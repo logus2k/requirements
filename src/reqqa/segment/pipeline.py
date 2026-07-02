@@ -8,12 +8,14 @@ from __future__ import annotations
 import logging
 import re
 
-from reqqa.ingest.model import SourceItem
+from reqqa.ingest.model import BlockType, SourceItem
 from reqqa.llm.client import AgentServerClient
 from reqqa.segment.chunker import chunk_items
-from reqqa.segment.identify import identify_chunk
+from reqqa.segment.identify import identify_chunk, identify_table
 from reqqa.segment.model import DiscreteRequirement, Provenance
 from reqqa.segment import verify
+from reqqa.segment.assemble import reassemble
+from reqqa.segment.dedup import dedup_overview
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +35,36 @@ def _extract_existing_id(text: str) -> str | None:
 def segment_items(
     items: list[SourceItem],
     client: AgentServerClient | None = None,
+    assemble: bool = True,
+    dedup: bool = True,
 ) -> list[DiscreteRequirement]:
-    """Identify discrete requirements in an ingested item stream."""
+    """Identify discrete requirements in an ingested item stream.
+
+    When `assemble` is True, a cross-block reassembly pass merges pieces that
+    share an author ID (e.g. a table label + its Planguage metric) into one
+    requirement (see reqqa.segment.assemble).
+
+    When `dedup` is True, an overview-dedup pass marks terse summary bullets as
+    `duplicate_of` their detailed requirement (see reqqa.segment.dedup). Marked
+    duplicates are returned (for audit) but should be excluded from the primary
+    set used for scoring: `[r for r in result if r.duplicate_of is None]`.
+    """
     client = client or AgentServerClient()
-    chunks = chunk_items(items)
-    logger.info("segmenting %d items in %d chunks", len(items), len(chunks))
+
+    # Route by structural label from ingestion: tables go to the table-aware
+    # identifier (one call per table), everything else to the prose identifier.
+    # This is a structural route off Docling's label, not a lexical gate.
+    prose_items = [it for it in items if it.block_type != BlockType.TABLE]
+    table_items = [it for it in items if it.block_type == BlockType.TABLE]
+    chunks = chunk_items(prose_items)
+    logger.info("segmenting %d items (%d prose chunks, %d tables)",
+                len(items), len(chunks), len(table_items))
+
+    raws = []
+    for chunk in chunks:
+        raws.extend(identify_chunk(client, chunk))
+    for t in table_items:
+        raws.extend(identify_table(client, t))
 
     requirements: list[DiscreteRequirement] = []
     seen: set[tuple[int, str]] = set()
@@ -63,8 +90,7 @@ def segment_items(
         used_ids.add(cand)
         return cand
 
-    for chunk in chunks:
-        for raw in identify_chunk(client, chunk):
+    for raw in raws:
             text = raw.text.strip()
             if not verify.is_valid_length(text):
                 continue
@@ -78,7 +104,14 @@ def segment_items(
                 continue
             seen.add(key)
 
-            existing = _extract_existing_id(raw.source_item.text)
+            # Prefer an ID the model named (tables). For prose, extract a leading
+            # author ID from the item text. Never regex a whole table block.
+            if raw.existing_id:
+                existing = raw.existing_id
+            elif raw.source_item.block_type == BlockType.TABLE:
+                existing = None
+            else:
+                existing = _extract_existing_id(raw.source_item.text)
             req_id = unique_id(existing)
             src = raw.source_item
             requirements.append(DiscreteRequirement(
@@ -100,4 +133,13 @@ def segment_items(
 
     logger.info("identified %d requirements (dropped %d untraceable)",
                 len(requirements), n_dropped_untraceable)
+
+    if assemble:
+        requirements = reassemble(requirements, client)
+        logger.info("after reassembly: %d requirements", len(requirements))
+    if dedup:
+        requirements = dedup_overview(requirements)
+        n_dup = sum(1 for r in requirements if r.duplicate_of)
+        logger.info("after dedup: %d primary, %d marked duplicate",
+                    len(requirements) - n_dup, n_dup)
     return requirements

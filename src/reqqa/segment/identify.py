@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from reqqa.ingest.model import SourceItem
 from reqqa.llm.client import AgentServerClient, LLMError
 from reqqa.segment.chunker import Chunk
-from reqqa.segment.prompts import IDENTIFIER_AGENT_NAME
+from reqqa.segment.prompts import IDENTIFIER_AGENT_NAME, TABLE_IDENTIFIER_AGENT_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ class RawIdentification:
     source_item: SourceItem
     text: str
     was_compound: bool
+    existing_id: str | None = None   # author's ID when the model can name it (tables)
 
 
 def identify_chunk(client: AgentServerClient, chunk: Chunk) -> list[RawIdentification]:
@@ -63,4 +64,43 @@ def identify_chunk(client: AgentServerClient, chunk: Chunk) -> list[RawIdentific
                 text=t,
                 was_compound=compound,
             ))
+    return out
+
+
+def identify_table(client: AgentServerClient, table_item: SourceItem) -> list[RawIdentification]:
+    """Identify requirements in ONE table block via the table-aware role.
+
+    The LLM classifies the table (requirements vs definitions/revision/etc.) and
+    emits one requirement per requirement-row, with the row's ID when present.
+    Non-requirements tables yield []. Grounding is enforced downstream by verify
+    (each text must be traceable to the table block) — no parsing here.
+    """
+    try:
+        result = client.complete_json(TABLE_IDENTIFIER_AGENT_NAME, table_item.text)
+    except LLMError as e:
+        logger.warning("identify_table failed: %s", e)
+        return []
+
+    if not result.get("is_requirements_table"):
+        return []
+    reqs = result.get("requirements")
+    if not isinstance(reqs, list):
+        logger.warning("identify_table: 'requirements' missing/not a list: %r", result)
+        return []
+
+    out: list[RawIdentification] = []
+    for r in reqs:
+        if not isinstance(r, dict):
+            continue
+        text = r.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        rid = r.get("id")
+        rid = rid.strip() if isinstance(rid, str) and rid.strip() else None
+        out.append(RawIdentification(
+            source_item=table_item,
+            text=text.strip(),
+            was_compound=False,
+            existing_id=rid,
+        ))
     return out

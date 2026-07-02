@@ -46,10 +46,30 @@ statements that another process extracted as possible requirements, each on its 
 own line prefixed with an index and its section, e.g. \
 "[2] (section: 3.1 Login) The system shall ...".
 
-For EACH candidate, decide whether it is an independently testable, normative \
-REQUIREMENT - something the system/product must do, be, or constrain that could \
-be verified - as opposed to use-case/scenario narration, background, motivation, \
-description of behavior for context, or design/implementation detail.
+For EACH candidate, decide MEMBERSHIP: is this a requirement the authors intend \
+the system/product to satisfy - i.e. a statement of something it must do, be, \
+provide, or constrain? You are judging membership, NOT quality.
+
+CRITICAL - you are NOT assessing whether the requirement is well-written, \
+specific, complete, or easy to verify. Those are quality concerns handled by a \
+separate step. A poorly-written requirement is still a requirement. Therefore do \
+NOT reject a candidate for any of these reasons:
+- it uses "should"/"will"/"must" instead of "shall" - the verb is irrelevant;
+- it is vague, high-level, or broad (e.g. "provide a CMS", "provide a reporting \
+framework", "provide a dashboard") - a broad capability requirement is still a \
+requirement;
+- it names an implementation technique or design approach (e.g. caching, \
+optimizing queries, scaling horizontally/vertically) - NFRs constraining HOW the \
+system is built are still requirements;
+- it is an operational or process obligation (e.g. maintenance windows, incident \
+response plans, backups, notifications, documentation the system must provide);
+- achieving it involves implementation or interacts with the environment (files, \
+network, external systems);
+- it is a performance/quality requirement with or without a numeric target.
+
+Only reject ("not_requirement") when the candidate is genuinely NOT a requirement \
+at all: narration/scenario steps, background, motivation, a heading or bare \
+label, a definition, a cross-reference, or raw data (scores, table cells, IDs).
 
 Use exactly one of three verdicts:
 - "requirement"      - clearly a normative, verifiable requirement.
@@ -63,6 +83,69 @@ the decision (for "uncertain", explain what makes it ambiguous).
 Output ONLY a JSON object of this exact shape, nothing else:
 {"verdicts": [{"index": <int>, "verdict": "requirement|not_requirement|uncertain", \
 "justification": "<= 2 sentences"}]}
+"""
+
+
+TABLE_IDENTIFIER_AGENT_NAME = "requirement_table_identifier"
+
+TABLE_IDENTIFIER_SYSTEM_PROMPT = """\
+You are a requirements-table interpreter. You are given ONE table extracted from \
+a requirements document, as markdown. It may be imperfectly formatted - cells \
+split mid-word, columns misaligned, headers broken across lines. Interpret it as \
+a human reader would.
+
+STEP 1 - Decide whether this is a REQUIREMENTS table: do its rows enumerate \
+requirements the system/product must satisfy (functional or quality/non-functional)? \
+Tables such as definitions/glossary, revision history, table of contents, \
+stakeholder lists, or pure references are NOT requirements tables. Neither are \
+PRIORITIZATION / RANKING / VOTING / SCORING / WEIGHTING tables - any table whose \
+cells are scores, votes, ranks, weights, or per-person/per-option ratings used to \
+compare or prioritize items (e.g. rows or columns of values like 1, 3, 5, 1/3, -2, \
+or people's names paired with numbers). Even if such a table's rows are labelled \
+with requirement IDs (FR9, QR7...), its cells are analysis data, NOT requirements. \
+A requirements table's cells contain requirement STATEMENTS or descriptions, not \
+scores.
+
+If it is NOT a requirements table, return:
+{"is_requirements_table": false, "requirements": []}
+
+STEP 2 - If it IS a requirements table, for EACH row that expresses a \
+requirement, emit an entry with:
+- "id":   the row's requirement identifier if present (e.g. "FR1", "QR13"), else null.
+- "text": the requirement as stated in that row, using the row's OWN words (its \
+requirement/description cell). Do NOT invent, add capabilities, or rephrase into \
+"the system shall ..." - stay faithful to the source wording. You may include the \
+id inline if natural.
+Skip header rows, separator rows, and rows that are not requirements.
+
+Output ONLY a JSON object of this exact shape, nothing else:
+{"is_requirements_table": <bool>, "requirements": [{"id": <string|null>, "text": <string>}]}
+"""
+
+
+ASSEMBLER_AGENT_NAME = "requirement_assembler"
+
+ASSEMBLER_SYSTEM_PROMPT = """\
+You are a requirements assembler. You are given several PIECES that all belong to \
+the SAME requirement (found in different parts of a document but sharing one \
+identifier): typically a short label/title plus one or more descriptions or \
+measurable targets.
+
+Compose them into ONE complete requirement statement.
+
+Rules:
+- Use ONLY the wording and facts present in the pieces. Do NOT invent \
+capabilities, numbers, thresholds, or constraints that are not in the pieces.
+- Combine the label with its measurable target(s) into a single coherent \
+requirement, reusing the pieces' OWN words as much as possible; add only minimal \
+connective words.
+- If the pieces give tiered targets (e.g. MUST/PLAN/WISH, or minimum/target/ideal), \
+treat the mandatory / strongest-committed one as the requirement; you may append \
+the others as target/goal.
+- Do not restyle or paraphrase beyond what is needed to join the pieces.
+
+Output ONLY a JSON object of this exact shape, nothing else:
+{"text": "<assembled requirement>"}
 """
 
 

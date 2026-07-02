@@ -21,6 +21,10 @@ from reqqa.segment.prompts import (
     JUDGE_SYSTEM_PROMPT,
     REFINER_AGENT_NAME,
     REFINER_SYSTEM_PROMPT,
+    TABLE_IDENTIFIER_AGENT_NAME,
+    TABLE_IDENTIFIER_SYSTEM_PROMPT,
+    ASSEMBLER_AGENT_NAME,
+    ASSEMBLER_SYSTEM_PROMPT,
 )
 
 AGENT_SERVER = os.environ.get("AGENT_SERVER_URL", "http://localhost:7701")
@@ -53,6 +57,18 @@ PRESETS = [
     {
         "name": REFINER_AGENT_NAME,
         "system_prompt": REFINER_SYSTEM_PROMPT,
+        "params_override": dict(_COMMON_PARAMS),
+        "memory_policy": "none",
+    },
+    {
+        "name": TABLE_IDENTIFIER_AGENT_NAME,
+        "system_prompt": TABLE_IDENTIFIER_SYSTEM_PROMPT,
+        "params_override": dict(_COMMON_PARAMS),
+        "memory_policy": "none",
+    },
+    {
+        "name": ASSEMBLER_AGENT_NAME,
+        "system_prompt": ASSEMBLER_SYSTEM_PROMPT,
         "params_override": dict(_COMMON_PARAMS),
         "memory_policy": "none",
     },
