@@ -1,0 +1,15 @@
+# Component 1: ingestion service dependencies.
+
+# Docling: PDF / DOCX / PPTX / HTML ingestion. Pulls in torch, layout and
+# TableFormer models (weights cached under DOCLING_ARTIFACTS_PATH /
+# ~/.cache/docling; bind-mounted so they survive rebuilds).
+docling>=2.0,<3.0
+docling-core>=2.0
+
+# Markdown path — proper token stream with line maps for char-span provenance.
+markdown-it-py>=3.0
+
+# HTTP ingest service.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9

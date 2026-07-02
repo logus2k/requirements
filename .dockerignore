@@ -1,0 +1,10 @@
+# Keep the build context lean. models/docling and src/ are needed (COPYed);
+# everything below is not.
+data/
+specs/
+**/.cache/
+**/__pycache__/
+*.pyc
+.git/
+.venv/
+venv/

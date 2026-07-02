@@ -1,0 +1,26 @@
+services:
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: reqqa-ingest:latest
+    ports:
+      - "5601:5601"
+    environment:
+      # Models are baked into the image at /opt/docling-models (see Dockerfile).
+      # OCR off by default; set to "1" to enable for scanned PDFs.
+      DOCLING_OCR: "0"
+    volumes:
+      # Live-mount source for iteration (remove for an immutable image).
+      - ./src:/app/src:ro
+    # GPU access via the NVIDIA container toolkit.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  docling_cache:
