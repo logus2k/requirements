@@ -29,11 +29,11 @@ Out of scope (for now):
 
 ## 3. Design principles
 
-1. **Structure-first, LLM only where structure runs out, deterministic
-   verification at the end.** Do as much as possible by parsing document
-   structure; use the mid-size local LLM narrowly and in a *grounded* way; then
-   validate everything deterministically so a stochastic model cannot inject
-   unverifiable output.
+1. **The LLM identifies requirements; deterministic code validates its output.**
+   Requirement identification is done entirely by the LLM (no regex/modal
+   detector — see §6), in a *grounded* way; the pipeline then validates every
+   result deterministically so a stochastic model cannot inject unverifiable
+   output. Structure is context and provenance for the LLM, never a gate.
 2. **Span-grounding over free text.** The LLM never emits requirement *text*; it
    emits character offsets into the text it was given, and the pipeline slices
    the real source. Eliminates hallucination, yields exact provenance.
@@ -56,10 +56,10 @@ Document (.md / .pdf / .docx / .html / ...)
         │        .pdf/.docx/... → Docling DocumentConverter → DoclingDocument
         │
  [2] SEGMENT → List[DiscreteRequirement]
-        │        router → structured lane (deterministic)
-        │                 prose lane      (span-grounded LLM)
+        │        LLM identification pass (span-grounded) — sole identifier,
+        │            no regex/modal gate; structure passed in as context
         │        normalize granularity (split compound / merge qualifiers)
-        │        deterministic verify & reconcile
+        │        deterministic verify (output validation only, no re-judging)
         │
  [3] SCORE   → per-requirement scorecard
         │        deterministic INCOSE rule engine  (mechanical characteristics)
@@ -82,7 +82,8 @@ Reused patterns (lift, don't reinvent):
   layout/TableFormer weights).
 - Provenance extraction: `page_no` + `bbox` from `doc_items[].prov[].bbox`.
 - Structural labels via `DocItemLabel` (`SECTION_HEADER`, `TITLE`, `TABLE`,
-  `LIST_ITEM`, `DOCUMENT_INDEX`, `TEXT`, …) as the router's signal source.
+  `LIST_ITEM`, `DOCUMENT_INDEX`, `TEXT`, …) carried as context/provenance for the
+  LLM identifier (not as an identification gate).
 - Table → Markdown via `TableItem.export_to_markdown(doc)`.
 - Heading-ancestry reconstruction: Docling's PDF backend flattens heading
   levels (every header at `level=1`); ancestry must be rebuilt from positional
@@ -99,53 +100,71 @@ Ingestion emits a normalized item stream: for each item, `{text, block_type
 
 ## 6. Segmentation
 
-Segmentation is a *semantic* decision at **statement granularity**. Document
-structure is a cheap, reliable *proxy* used where present; where absent, the
-decision is made semantically by the LLM.
+Segmentation is a *semantic* decision at **statement granularity**, and the
+**LLM is the sole requirement identifier**. There is no regex/modal-verb
+detector and no structural gate that decides what is or isn't a requirement.
 
-### 6.1 Router (deterministic)
-Classify each item/region using structural signals:
-- explicit requirement ID pattern (`REQ-\d+`, `\d+\.\d+`, etc.)
-- table with a requirements-like schema (ID column / "shall" column)
-- list item under a "Requirements" heading
-- modal-verb presence (`shall` / `must` / `will`)
+**Rationale (evidence-based).** Requirements are written in an unbounded variety
+of forms — `shall / must / will / should / needs to / is required to`, bare
+imperatives, table rows, and multi-sentence bullets — and the ambiguous modals
+("should", "will") appear constantly in non-normative prose. A regex/lexical
+detector therefore both misses requirements and fires on non-requirements.
+Measured on the five real SRS PDFs in `data/examples/`: two documents contain
+**zero** "shall" statements (one uses "will/must" in numbered list items; another
+uses 135 "should" / 81 "will" across bullets). Any phrasing-based detector would
+miss those documents entirely. The regex approach is error-prone by nature and is
+not used for identification.
 
-Routes each item into one of two lanes.
+### 6.1 Structure is context and provenance — never a gate
+Ingestion's structural output (`block_type`, `section_path`, table Markdown,
+page/bbox) is still produced and used, but only as:
+- **provenance** carried through to each requirement, and
+- **context passed INTO the LLM** to help it judge (e.g. "this block is a table
+  row under section 3.2", the rendered table, the heading trail).
 
-### 6.2 Structured lane (deterministic — no LLM)
-Each ID'd item / table row / list item becomes one candidate requirement,
-parsed directly. No model involved.
+Structure never *decides* identification and never short-circuits the LLM. An
+explicit ID or a requirements-table row is a strong hint handed to the model, not
+an accept-without-checking rule. The LLM judges all of it, uniformly, so one
+document's idiosyncratic conventions can't slip past a structural assumption.
 
-### 6.3 Prose lane (span-grounded LLM)
-For narrative prose (no reliable structure), feed a **structure-bounded chunk**
-(a section, a table — not a raw character window) to the LLM, with generous
+### 6.2 LLM identification pass (span-grounded)
+Feed the ingested `SourceItem` stream to the LLM in **structure-bounded chunks**
+(a section or a table at a time — not raw character windows), with generous
 surrounding context (the model's ~64K ceiling is headroom, not a target to fill).
-Two micro-tasks:
-- **Classify** each sentence/clause: `requirement | rationale | background |
-  definition | heading`.
-- **Bound** each requirement: return character spans; the pipeline slices the
-  real text.
+For each chunk the LLM:
+- **Classifies** each candidate span: `requirement | rationale | background |
+  definition | heading | other`.
+- **Bounds** each requirement by returning character/offset spans into the
+  provided text; the pipeline slices the real source. The model never emits
+  requirement text, so it cannot invent one — and provenance is exact.
 
-Topic/semantic segmentation (embedding-similarity, TextTiling) is a *complement*,
-not the core splitter: it only (a) bounds prose-lane chunks when structural
-headings are absent, and (b) clusters final requirements for later set-level
-checks. It operates at topic granularity, which is too coarse to separate two
-adjacent same-topic requirements — that separation is the LLM's job.
+This single pass replaces the former "structured vs prose lane" split: every
+block flows through the same LLM identifier regardless of format or phrasing.
 
-### 6.4 Normalize granularity (LLM, one requirement at a time)
-- **Split** compound statements into singular requirements. Flag the original as
-  a `Singular` defect; keep a `derived_from` link on each child.
+### 6.3 Normalize granularity (LLM, one requirement at a time)
+- **Split** compound statements into singular requirements (real bullets in the
+  example docs pack several normative sentences each). Flag the original as a
+  `Singular` defect; keep a `derived_from` link on each child.
 - **Merge** qualifiers / sub-conditions that belong to one requirement (e.g. a
   stem with `(a)…(b)…` conditions is one requirement, not many).
 
-### 6.5 Verify & reconcile (deterministic)
+### 6.4 Verify & reconcile (deterministic — output validation only)
+This step validates the LLM's output; it does **not** re-judge whether something
+is a requirement (no modal/shape gate — that would smuggle the regex approach
+back in).
 - Reject any candidate whose text is not traceable to source (not a substring /
-  near-match of the provided chunk).
-- Assert each unit has subject + modal + predicate; enforce a minimum length.
+  near-match of the provided chunk) — anti-hallucination.
 - Deduplicate on provenance + normalized text.
+- Enforce a minimum length (drop empty/degenerate spans).
 - Assign IDs (existing or generated); attach full provenance.
-- Anything failing is dropped or flagged low-confidence for review — never
-  silently trusted.
+- Low-confidence identifications are flagged for review, not silently trusted.
+
+### 6.5 Topic segmentation (complement only)
+Topic/semantic segmentation (embedding-similarity, TextTiling) is not the
+splitter: it only (a) bounds LLM chunks when a block has no structural headings,
+and (b) clusters final requirements for later set-level checks. Its topic
+granularity is too coarse to separate two adjacent same-topic requirements — that
+separation is the LLM's job.
 
 ## 7. Data model
 
@@ -215,11 +234,19 @@ roll-up. Never a single opaque score without its backing findings.
 
 ## 9. Local LLM constraints
 
-- Target: mid-size open-weight model (7B–34B), served locally.
-- ~64K context ceiling — treated as headroom for context/anchors, not a chunk
-  target.
-- Because the model is mid-size, the deterministic layer carries as much as
-  possible, and every LLM call is narrow, grounded (spans), and structured.
+- Model: **Gemma 4 E4B**, served locally via `agent_server` (`:7701`,
+  OpenAI-compatible; call by agent-preset name). See the `local-llm-agent-server`
+  memory and `agent_server/documents/how_to.md`.
+- Context: **64K configured, 128K model ceiling** — the configured window is
+  headroom for context/anchors, and can be raised toward 128K if chunks + context
+  ever need it.
+- No grammar-constrained decoding (removed) — structured/JSON output relies on
+  prompt + robust parsing; silence the thinking channel with
+  `chat_template_kwargs={"enable_thinking": false}`.
+- Every LLM call is narrow, grounded (spans), and structured. Division of labor:
+  identification (§6) is LLM-only, while *scoring* (§8) still offloads mechanical
+  INCOSE checks to the deterministic rule engine — "no regex for identification"
+  does not mean "no deterministic scoring rules"; those are different stages.
 - Growth path: LLM-first now; use the running pipeline to bootstrap a labeled
   set; **distill** into a trained classifier only if scale/cost/consistency
   demands it (this is the mature form of an ensemble — LLM teaches the
@@ -233,11 +260,10 @@ requirements/
   src/reqqa/
     ingest/                            # extension dispatch, Docling adapter, .md parser
     segment/
-      router.py                        # deterministic lane routing
-      structured.py                    # structured-lane extraction
-      prose.py                         # span-grounded LLM extraction
+      identify.py                      # LLM identification pass (sole identifier, span-grounded)
+      chunker.py                       # structure-bounded chunking + context assembly for the LLM
       normalize.py                     # split/merge to singular
-      verify.py                        # deterministic reconcile
+      verify.py                        # deterministic output validation (no re-judging)
     model/                             # DiscreteRequirement, Provenance
     rules/
       catalog.py                       # INCOSE rule catalog (shared spec)
@@ -258,9 +284,9 @@ requirements/
 ## 12. Build order
 
 1. Ingestion → normalized item stream with provenance (deterministic, testable
-   without a model).
-2. Router + structured lane.
-3. Prose lane (span-grounded LLM) + normalize + verify.
+   without a model). **Done — Component 1.**
+2. LLM identification pass (span-grounded, structure as context) + verify.
+3. Normalize granularity (split compound / merge qualifiers).
 4. Deterministic INCOSE rule engine + catalog.
 5. Semantic LLM judge + scorecard.
 ```
