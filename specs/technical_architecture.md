@@ -1,7 +1,7 @@
 # Requirements Quality Analyzer — Technical Architecture
 
-Status: Draft
-Date: 2026-07-02
+Status: As-built (Components 1–6 implemented)
+Date: 2026-07-03
 
 ## 1. Purpose
 
@@ -12,18 +12,23 @@ actionable, source-anchored findings.
 
 ## 2. Scope
 
-In scope:
-- Ingesting Markdown, PDF, Word (`.docx`), HTML (and similar) documents.
+In scope (all implemented):
+- Ingesting Markdown, PDF, Word (`.docx`), HTML, PowerPoint (`.pptx`) documents.
 - Segmenting a document into atomic, singular requirement statements with
-  provenance back to the source.
-- Scoring each requirement against INCOSE characteristics, split into a
-  deterministic layer (mechanical/lexical/syntactic rules) and a semantic layer
-  (judgment characteristics via a local LLM).
+  provenance back to the source (LLM identify → gate → assemble → dedup).
+- Scoring each requirement against the 9 individual INCOSE characteristics
+  (C1–C9), split into a deterministic term-list layer and a semantic layer of
+  9 per-characteristic LLM judges (1–5 scale, one requirement per call).
+- Set-level INCOSE checks (C10–C15) across the whole set, with reranker-detected
+  overlaps confirmed by the LLM.
+- A **Reviewer** pass that proposes rewrites/advisories for defective
+  requirements (any characteristic ≤ 3).
+- A self-contained ECharts frontend that visualizes the scorecard.
 
 Out of scope (for now):
-- Set-level INCOSE checks (Consistency, Completeness across the whole set) —
-  deferred; noted as a later phase.
-- Auto-rewriting requirements — deferred; scoring first.
+- The full lifecycle app (drag-drop ingest, streamed live progress, review
+  workflow, document library) and its orchestration API — designed in
+  `requirements_frontend.md` §8, not yet built.
 - Training a bespoke classifier — deferred. Start LLM-first, distill later only
   if scale/cost/consistency demands it (see §9).
 
@@ -39,9 +44,10 @@ Out of scope (for now):
    the real source. Eliminates hallucination, yields exact provenance.
 3. **Provenance is non-negotiable.** Every discrete requirement carries a
    back-pointer to its source location. Without it, a score is not actionable.
-4. **Mechanical rules are never an ML problem.** Roughly half the INCOSE rules
-   are deterministic lexical/syntactic checks; a rule engine handles them with
-   full consistency and explainability.
+4. **Term-list rules are never an ML problem.** The 15 INCOSE rules stated as
+   explicit term/symbol lists are detected deterministically (offending token +
+   offset) — full consistency and explainability. Grammar/meaning judgments are
+   left to the LLM, not brittle syntactic rules.
 5. **Decompose LLM work into micro-tasks.** The target model is mid-size
    (7B–34B). It is reliable on small, single-purpose calls and unreliable on
    "do everything at once" prompts.
@@ -49,23 +55,30 @@ Out of scope (for now):
 ## 4. High-level pipeline
 
 ```
-Document (.md / .pdf / .docx / .html / ...)
+Document (.md / .pdf / .docx / .html / .pptx)
         │
  [1] INGEST  → normalized item stream with provenance
         │        .md            → parse directly (already structured)
         │        .pdf/.docx/... → Docling DocumentConverter → DoclingDocument
         │
- [2] SEGMENT → List[DiscreteRequirement]
-        │        LLM identification pass (span-grounded) — sole identifier,
-        │            no regex/modal gate; structure passed in as context
-        │        normalize granularity (split compound / merge qualifiers)
-        │        deterministic verify (output validation only, no re-judging)
+ [2] SEGMENT → List[DiscreteRequirement]   (LLM is the sole identifier, no regex)
+        │        identify   — span-grounded LLM pass over structure-bounded chunks
+        │        gate       — judge drops non-requirements; bounded refine loop
+        │        assemble   — reassemble pieces split across chunks (by author ID)
+        │        dedup      — reranker marks terse summaries as duplicate_of detail
         │
- [3] SCORE   → per-requirement scorecard
-        │        deterministic INCOSE rule engine  (mechanical characteristics)
-        │        semantic LLM judge                (judgment characteristics)
+ [3] SCORE (per requirement) → scorecard
+        │        9 LLM judges, C1–C9, 1–5 scale, batch=1  (one req per call)
+        │        deterministic term-list engine (15 rules) → offending spans
+        │
+ [4] SET-LEVEL (whole set) → C10–C15
+        │        find overlaps (reranker) → LLM-confirm → holistic set judge
+        │
+ [5] REVIEW  → for any requirement with a characteristic ≤ 3
+        │        Reviewer proposes rewrites + advisories
         ▼
- Scorecard: per requirement, per characteristic → {verdict, severity, rule_id, evidence span}
+ Scorecard JSON → [6] frontend (ECharts 6.1.0 dashboard)
+   per requirement, per characteristic → {score 1–5, rules[], evidence, justification}
 ```
 
 ## 5. Ingestion
@@ -140,31 +153,38 @@ For each chunk the LLM:
 
 This single pass replaces the former "structured vs prose lane" split: every
 block flows through the same LLM identifier regardless of format or phrasing.
+Tables get a dedicated identifier (`identify_table`) that reads the rendered
+Markdown rows. Implemented in `segment/identify.py`, driven by
+`segment/pipeline.py`; `chunker.py` builds the structure-bounded chunks.
 
-### 6.3 Normalize granularity (LLM, one requirement at a time)
-- **Split** compound statements into singular requirements (real bullets in the
-  example docs pack several normative sentences each). Flag the original as a
-  `Singular` defect; keep a `derived_from` link on each child.
-- **Merge** qualifiers / sub-conditions that belong to one requirement (e.g. a
-  stem with `(a)…(b)…` conditions is one requirement, not many).
+### 6.3 Gate — judge drops non-requirements, bounded refine loop
+A second LLM role (`requirement_judge`) reviews every identified candidate and
+returns one of three dispositions (`segment/gate.py`):
+- **ACCEPTED** — a genuine requirement; kept.
+- **DROPPED** — not a requirement; retained with the judge's justification for
+  audit, but excluded from scoring.
+- **ESCALATED** — still uncertain after the refine loop; flagged for review.
 
-### 6.4 Verify & reconcile (deterministic — output validation only)
-This step validates the LLM's output; it does **not** re-judge whether something
-is a requirement (no modal/shape gate — that would smuggle the regex approach
-back in).
-- Reject any candidate whose text is not traceable to source (not a substring /
-  near-match of the provided chunk) — anti-hallucination.
-- Deduplicate on provenance + normalized text.
-- Enforce a minimum length (drop empty/degenerate spans).
-- Assign IDs (existing or generated); attach full provenance.
-- Low-confidence identifications are flagged for review, not silently trusted.
+Uncertain candidates enter a bounded **refine loop** (`requirement_refiner`,
+`max_iters`): the refiner may tighten the wording (re-verified as still traceable
+to source) or drop it. The gate never *writes* new requirements — it only accepts,
+drops, or minimally refines — so identification stays grounded.
 
-### 6.5 Topic segmentation (complement only)
-Topic/semantic segmentation (embedding-similarity, TextTiling) is not the
-splitter: it only (a) bounds LLM chunks when a block has no structural headings,
-and (b) clusters final requirements for later set-level checks. Its topic
-granularity is too coarse to separate two adjacent same-topic requirements — that
-separation is the LLM's job.
+### 6.4 Assemble — reassemble split requirements (by author ID)
+Chunk boundaries can split one authored requirement across blocks. `assemble.py`
+(`reassemble`) merges pieces that share an existing author ID back into a single
+`DiscreteRequirement` (`origin="assembled"`, with `component_orders`). Enabled by
+the `assemble` flag on `segment_items`.
+
+### 6.5 Dedup — mark overview summaries as duplicates (reranker)
+Many SRSs repeat a requirement as a terse overview bullet *and* a detailed
+statement. `dedup.py` (`dedup_overview`) uses the reranker to detect these and
+marks the terse one `duplicate_of` the detailed one, with a **length guard**
+(a candidate shorter than 0.6× the detail is the summary). Marked duplicates are
+carried for provenance but excluded from scoring. Enabled by the `dedup` flag.
+
+Anti-hallucination throughout: any candidate whose text is not a substring /
+near-match of its source chunk is rejected — the LLM emits spans, never free text.
 
 ## 7. Data model
 
@@ -182,55 +202,80 @@ class DiscreteRequirement:
     req_id: str                 # existing ID, or generated (DOC-0007)
     text: str                   # clean, singular requirement statement
     provenance: Provenance
-    origin: str                 # "extracted" | "derived"
-    derived_from: str | None    # original req_id if split from a compound
+    origin: str                 # "extracted" | "derived" | "assembled"
+    derived_from: str | None    # parent req_id if split from a compound
     was_compound: bool          # feeds the Singular score directly
-    extraction_confidence: float
+    identification_confidence: float
+    component_orders: list[int] | None = None  # source items merged by assemble
+    duplicate_of: str | None = None             # set by dedup; excluded from scoring
 ```
 
+`Provenance` carries `source_file, section_path, order, page, bbox, char_span`.
 This object flows unchanged from segmentation into scoring.
 
 ## 8. Scoring
 
+Scoring is the INCOSE knowledge base in `incose/` (GtWR v4, INCOSE-TP-2010-006-04):
+`catalog.json` (42 rules R1–R42 + 15 characteristics C1–C15), `rules/*.md`,
+`characteristics/*.md`, and `judges/*.md` — the **static, complete** judge
+prompts. There is no runtime prompt assembly: each judge is a finished system
+prompt registered as an agent preset.
+
 ### 8.1 Rule catalog (shared spec)
-A single catalog tags each INCOSE rule/characteristic with its lane and
-reference:
+`incose/catalog.json` holds all 42 rules and 15 characteristics. Each rule that
+the GtWR expresses as an explicit term/symbol list is tagged
+`detector: "deterministic"` and carries a `terms` list; everything else is judged
+by the LLM. The catalog also anchors the scorecard schema.
 
-```
-{ rule_id, incose_ref, characteristic, lane: "deterministic"|"semantic"|"hybrid",
-  severity_default, description }
-```
+### 8.2 Deterministic layer (term lists only)
+`score/deterministic.py` implements the **15** rules the GtWR states as explicit
+term/symbol lists (vague terms, escape clauses, open-ended clauses, oblique `/`,
+etc.), read straight from `catalog.json` (`detector == "deterministic"`). Each
+finding cites the **offending token and its character offset**, so it is auditable
+and never hallucinated. This layer does **no** grammar/NLP parsing — there is no
+spaCy passive-voice or modal detector; those judgments belong to the LLM (a
+mid-size model reads grammar better than brittle syntactic rules, and the term
+lists are exactly where determinism wins).
 
-Both the deterministic engine and the LLM judge implement against this catalog;
-it also defines the scorecard schema.
+### 8.3 Semantic layer — 9 per-characteristic judges (1–5, batch=1)
+One dedicated judge per individual characteristic C1–C9 (`incose_c1_necessary` …
+`incose_c9_conforming`), listed in `score/characteristics.py`. Each judge:
+- Scores its characteristic on a **1–5 scale** (5 = no rule triggered / best) and
+  returns `{index, score, rules_triggered, evidence, justification}`.
+- Runs **batch=1 — one requirement per call.** This is measured, not stylistic:
+  at batch=1 the judge is ~96% self-consistent; batching 8+ requirements per call
+  drops that to ~54% as the model conflates them. See the `scoring-batch1` memory.
+- Is a complete static prompt with the characteristic's rules and few-shot
+  anchors baked in.
 
-### 8.2 Deterministic layer (Python)
-A rule registry, one detector per rule. Each detector returns the **offending
-span**, not just a boolean.
-- Regex for lexical rules: vague terms (*user-friendly, robust, minimize*),
-  escape clauses (*if possible, as appropriate*), open-ended clauses (*including
-  but not limited to*), `and`/`or` combinators, missing units/tolerances.
-- spaCy for syntactic rules: passive voice, pronoun/ambiguous referent, modal
-  ("shall") presence.
+Binary pass/fail is **derived in code** from the score, not asked of the model.
+`normalize_rule_ids` cleans the judges' `rules_triggered` back to canonical
+`R##` IDs (the model occasionally emits `R30 Unique Expression` or a stray
+`R_C8`).
 
-Covers the mechanical INCOSE characteristics with full consistency and
-explainability.
+### 8.4 Set-level layer — C10–C15 (`score/setlevel.py`)
+Assessed over the whole set, not per requirement:
+- `find_overlaps` — the reranker scores requirement pairs; it cleanly separates
+  true overlap (~0.95) from mere topical similarity (<0.05), threshold 0.8. This
+  is hard evidence for C11 Consistent / C10 Complete.
+- `confirm_overlaps` — an LLM pass keeps only genuine duplicates/overlaps and
+  drops the reranker's merely-related false positives (measured: 98 candidates →
+  ~3 confirmed on a sample).
+- `assess_set` — a holistic set judge (`incose_set_judge`) rates C10–C15 from a
+  set summary plus the confirmed overlaps, with justifications and findings.
 
-### 8.3 Semantic layer (local LLM judge)
-For judgment characteristics (Necessary, Appropriate, Complete, Correct,
-Feasible, and the semantic aspects of Unambiguous / Verifiable):
-- **One characteristic per call** (or tightly grouped), structured JSON out:
-  `{verdict, severity, evidence, rationale}`.
-- Few-shot anchors per characteristic.
-- Pass the section neighborhood as context for characteristics that need it
-  (Complete, Necessary), not the lone sentence.
-- **Self-consistency** on borderline cases: sample N, take majority — cheap
-  insurance against mid-size-model flakiness.
+### 8.5 Review layer (`incose/judges/reviewer.md`)
+Any requirement with a characteristic score ≤ 3 is sent to the **Reviewer**
+(`incose_reviewer`) with the bundle of failing judgments; it returns suggested
+**rewrites** and **advisories**. It assesses and improves an already-written
+document — it does not author requirements from scratch.
 
-### 8.4 Scorecard output
-Per requirement, per characteristic:
-`{characteristic, verdict, severity, rule_id, evidence_span, rationale}` — plus a
-roll-up. Never a single opaque score without its backing findings.
+### 8.6 Scorecard output
+`scripts/produce_scorecard.py` assembles everything into one frontend-ready JSON:
+per requirement, per characteristic `{score, rules, evidence, justification}`;
+the reviewer block on defective requirements; set-level C10–C15; and aggregates
+(per-characteristic means, per-rule violation counts, score distribution,
+overall health). Never a single opaque score without its backing findings.
 
 ## 9. Local LLM constraints
 
@@ -243,10 +288,12 @@ roll-up. Never a single opaque score without its backing findings.
 - No grammar-constrained decoding (removed) — structured/JSON output relies on
   prompt + robust parsing; silence the thinking channel with
   `chat_template_kwargs={"enable_thinking": false}`.
+- Embeddings + rerank run on **llama-server** (`:8500`, bge-m3 + bge-reranker),
+  used by set-level overlap detection and segmentation dedup.
 - Every LLM call is narrow, grounded (spans), and structured. Division of labor:
-  identification (§6) is LLM-only, while *scoring* (§8) still offloads mechanical
-  INCOSE checks to the deterministic rule engine — "no regex for identification"
-  does not mean "no deterministic scoring rules"; those are different stages.
+  identification (§6) is LLM-only, while *scoring* (§8) offloads the 15 explicit
+  term-list rules to `deterministic.py` — "no regex for identification" does not
+  mean "no deterministic scoring rules"; those are different stages.
 - Growth path: LLM-first now; use the running pipeline to bootstrap a labeled
   set; **distill** into a trained classifier only if scale/cost/consistency
   demands it (this is the mature form of an ensemble — LLM teaches the
@@ -257,36 +304,45 @@ roll-up. Never a single opaque score without its backing findings.
 ```
 requirements/
   specs/technical_architecture.md      # this file
+  incose/                              # KB: catalog.json, rules/, characteristics/, judges/
   src/reqqa/
-    ingest/                            # extension dispatch, Docling adapter, .md parser
+    ingest/                            # dispatch.py, docling_adapter.py, markdown.py, model.py
     segment/
       identify.py                      # LLM identification pass (sole identifier, span-grounded)
-      chunker.py                       # structure-bounded chunking + context assembly for the LLM
-      normalize.py                     # split/merge to singular
-      verify.py                        # deterministic output validation (no re-judging)
-    model/                             # DiscreteRequirement, Provenance
-    rules/
-      catalog.py                       # INCOSE rule catalog (shared spec)
-      deterministic.py                 # regex + spaCy detectors
+      chunker.py                       # structure-bounded chunking + context for the LLM
+      gate.py                          # judge: accept / drop / refine loop
+      assemble.py                      # reassemble requirements split across chunks
+      dedup.py                         # reranker overview-vs-detail dedup (length guard)
+      pipeline.py, model.py, prompts.py, judge.py, verify.py
     score/
-      semantic.py                      # LLM judge (one characteristic per call)
-      scorecard.py                     # assembly + roll-up
-    llm/                               # local model client, structured-output helpers
+      deterministic.py                 # 15 term-list detectors (from catalog.json)
+      characteristics.py               # C1–C9 list + normalize_rule_ids
+      setlevel.py                      # C10–C15: find/confirm overlaps + set judge
+    llm/
+      client.py                        # agent_server preset client
+      retrieval.py                     # embeddings + rerank (llama-server :8500)
+  scripts/                             # register_agents, register_incose_judges,
+                                       #   segment_doc, produce_scorecard
+  frontend/                            # ECharts 6.1.0 dashboard (index.html, js/app.js, …)
 ```
 
 ## 11. Open questions
 
-- Exact INCOSE rule set to implement first (which characteristics in the MVP).
-- Local model choice and serving runtime.
-- Confidence thresholds for routing low-confidence extractions to human review.
-- Evaluation method for the scorer once the rule catalog is fixed.
+- Rule→characteristic aggregation matrix is still `pending` verification (only
+  needed to roll rule violations up per characteristic).
+- Confidence thresholds for routing ESCALATED / low-confidence extractions to
+  human review.
+- Gold-set evaluation is done on ReqView + Annex-A SRS (recall ~100%, true
+  precision ~94%); broaden to more labeled sets.
 
 ## 12. Build order
 
-1. Ingestion → normalized item stream with provenance (deterministic, testable
-   without a model). **Done — Component 1.**
-2. LLM identification pass (span-grounded, structure as context) + verify.
-3. Normalize granularity (split compound / merge qualifiers).
-4. Deterministic INCOSE rule engine + catalog.
-5. Semantic LLM judge + scorecard.
+1. Ingestion → normalized item stream with provenance. **Done — Component 1.**
+2. Segmentation: LLM identify → gate → assemble → dedup. **Done — Component 2.**
+3. Scoring: 9 judges (C1–C9, 1–5, batch=1) + deterministic term lists.
+   **Done — Component 3.**
+4. Set-level C10–C15 (reranker overlaps + LLM confirm + set judge). **Done.**
+5. Reviewer pass on defective requirements + full scorecard producer. **Done.**
+6. Frontend dashboard (ECharts 6.1.0, light/dark). **Done — Component 6.**
+7. Full lifecycle app + orchestration API — **planned** (`requirements_frontend.md` §8).
 ```
