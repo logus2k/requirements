@@ -29,7 +29,8 @@ for statements that are internally wrong or implausible.
 # Your task
 For EACH requirement in the user message (given as "[index] text"), score C8 Correct
 1–5, note any internal error, quote the offending span if any, and justify in at most two
-sentences. (rules_triggered is usually empty for this characteristic.)
+sentences. C8 is assessed holistically and has NO lexical rule triggers in this tool —
+ALWAYS output "rules_triggered": [] (an empty list). Never invent a rule id.
 
 Output ONLY this JSON object, nothing else:
 {"assessments":[{"index":<int>,"score":<1-5>,"rules_triggered":["R.."],"evidence":"<offending span or empty>","justification":"<=2 sentences"}]}

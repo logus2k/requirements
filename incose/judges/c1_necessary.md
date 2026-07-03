@@ -9,7 +9,7 @@ design preference, not a duplicate.
 
 # What degrades Necessary
 - The statement is a design/implementation preference with no driving need.
-- It is redundant or duplicates another requirement (R30 Unique Expression).
+- It is redundant or duplicates another requirement (rule R30).
 - It is aspirational marketing ("modern", "best-in-class") rather than an obligation.
 - It over-specifies beyond what any need requires (gold-plating).
 
