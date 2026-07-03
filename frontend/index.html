@@ -38,6 +38,8 @@
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--grid)}
   th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+  th[data-key]{cursor:pointer;user-select:none;white-space:nowrap} th[data-key]:hover{color:var(--ink2)}
+  th.sorted{color:var(--ink)} th .ind{color:var(--accent)}
   tr.req{cursor:pointer} tr.req:hover td{background:var(--plane)}
   .badge{display:inline-block;min-width:26px;text-align:center;border-radius:6px;
     padding:2px 6px;color:#fff;font-variant-numeric:tabular-nums;font-weight:600}
@@ -54,7 +56,10 @@
   .cchar .rules{color:var(--muted);font-size:12px;margin-left:auto}
   .cchar .just{color:var(--ink2);font-size:12.5px;margin-top:4px}
   .cchar .ev{font-size:12px;color:var(--s1);margin-top:3px}
-  .muted{color:var(--muted)} .overlaps li{margin:2px 0}
+  .muted{color:var(--muted)}
+  .linkbtn{border:none;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;font-weight:600}
+  .linkbtn:hover{text-decoration:underline}
+  .ovpair .top{display:flex;gap:8px} .ovpair .sc{margin-left:auto;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -77,13 +82,20 @@
     <div class="card"><h2>Set-level characteristics (C10–C15)</h2>
       <div class="sub">Assessed over the whole requirement set</div>
       <div class="chart" id="setlevel" style="height:210px"></div>
-      <div class="muted" style="font-size:12px">Confirmed overlaps:
-        <ul class="overlaps" id="overlaps"></ul></div></div>
-    <div class="card full"><h2>Requirements — worst first</h2>
-      <div class="sub">Click a row for the full per-characteristic assessment</div>
-      <table><thead><tr><th>ID</th><th>Requirement</th>
-        <th>C1</th><th>C2</th><th>C3</th><th>C4</th><th>C5</th><th>C6</th><th>C7</th><th>C8</th><th>C9</th>
-        <th>Avg</th></tr></thead><tbody id="reqrows"></tbody></table></div>
+      <div class="muted" style="font-size:12px"><span id="ovcount"></span> confirmed overlaps —
+        <button id="ovBtn" class="linkbtn">view all →</button></div></div>
+    <div class="card full"><h2>Requirements</h2>
+      <div class="sub">Click a header to sort · click a row for the full assessment</div>
+      <table><thead><tr>
+        <th data-key="req_id">ID<span class="ind"></span></th>
+        <th data-key="text">Requirement<span class="ind"></span></th>
+        <th data-key="C1">C1<span class="ind"></span></th><th data-key="C2">C2<span class="ind"></span></th>
+        <th data-key="C3">C3<span class="ind"></span></th><th data-key="C4">C4<span class="ind"></span></th>
+        <th data-key="C5">C5<span class="ind"></span></th><th data-key="C6">C6<span class="ind"></span></th>
+        <th data-key="C7">C7<span class="ind"></span></th><th data-key="C8">C8<span class="ind"></span></th>
+        <th data-key="C9">C9<span class="ind"></span></th>
+        <th data-key="overall">Avg<span class="ind"></span></th>
+      </tr></thead><tbody id="reqrows"></tbody></table></div>
   </div>
 </main>
 <div class="drawer" id="drawer"><button class="close" id="drawerClose">✕</button>

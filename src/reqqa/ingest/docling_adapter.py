@@ -22,6 +22,16 @@ logger = logging.getLogger(__name__)
 _converter = None
 
 
+def _normalize_text(s: str) -> str:
+    """Normalize symbol-font artifacts. Docling emits Word/PDF symbol-font bullets
+    as private-use glyphs in the U+F000–U+F0FF remap block (e.g. U+F0B7, which
+    renders blank downstream and reads as stray spaces). Map that whole block to a
+    real bullet '•' so the ingested text is clean for scoring, review, and display."""
+    if not s:
+        return s
+    return "".join("•" if 0xF000 <= ord(c) <= 0xF0FF else c for c in s)
+
+
 def _label_to_block_type(label) -> BlockType:
     """Map a Docling `DocItemLabel` to our normalized vocabulary."""
     # Imported here so module import doesn't require docling_core.
@@ -132,7 +142,7 @@ def parse_with_docling(abs_path: str, source_file: str) -> IngestResult:
                 text = ""
         else:
             text = (getattr(node, "text", None) or "")
-        text = text.strip()
+        text = _normalize_text(text).strip()
 
         # Maintain the heading stack for section_path. `level` is the item's
         # depth in the doc tree; Docling's PDF backend sometimes flattens

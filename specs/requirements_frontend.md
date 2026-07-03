@@ -155,6 +155,86 @@ passing cards collapsed. Never hide the reasoning — persist and show it.
 
 ---
 
+## 8. The full lifecycle (from results-viewer to application)
+
+The document/requirement views (§2–§3) are the *results* half. The app also owns
+the workflow that produces them: **ingest → monitor → results → review → manage**.
+This turns a static viewer into an application with a backend.
+
+### 8.1 Ingestion view
+- Drag-and-drop / file picker for `.pdf .docx .html .pptx .md`.
+- Options: chunking/segmentation on by default; which characteristics to score;
+  run reviews now vs on-demand; run set-level (yes/no).
+- "Assess" → creates a **job** and jumps to the monitor.
+
+### 8.2 Progress / monitoring view (streamed) — AND live results
+Two kinds of events stream over **SSE / WebSocket**, and the view is not a bare
+progress bar — the **dashboard fills in as requirements complete**:
+
+1. **Stage events** — `{stage, done, total, message}`: Ingest (items) → Segment
+   (`440 → 403 primary`) → Gate (`388 accepted`) → Score (`1800/3492`, bar + rate
+   + ETA) → Review → Set-level. Cancellable; errors surfaced inline.
+2. **Per-requirement result events** — `{type:"requirement", data:{req_id,
+   characteristics, deterministic_findings, overall, provenance, lineage}}`,
+   emitted the moment a requirement's 9 characteristics + deterministic pass are
+   done. The frontend **appends the table row and updates the charts as running
+   aggregates** (means, rule counts, distribution recomputed incrementally;
+   worst-first re-sorts). No 20-minute blank wait — results flow in.
+3. **Finalization events** — set-level (C10–C15, needs the whole set) and any
+   review results arrive near the end; final aggregates replace the running ones.
+
+Implementation note: the producer must complete requirements incrementally — keep
+the parallel (req × judge) pool but emit a requirement event once all 9 of its
+judges have returned. Aggregates shown live are partial ("214 / 388 scored") and
+finalize when the run ends. This is the producer's stage log + per-record output
+formalized into structured events.
+
+### 8.3 Review workflow view
+- Per requirement: **run Reviewer on demand** (button), see proposed rewrites
+  (placeholders highlighted) + advisories + the before→after re-score delta.
+- Actions: **accept** a rewrite → creates a *proposed revision* (original
+  retained, versioned), **edit**, **dismiss**, **mark for human review**.
+- Accepting a rewrite optionally **re-runs identification + scoring** on the new
+  text to close the loop and record the quality delta.
+- A queue/worklist of requirements needing attention (lowest scores first,
+  `escalated` items, unresolved advisories).
+
+### 8.4 Document library
+- List of assessed documents: name, date, overall health, # requirements,
+  status (processing / done / failed). Open, re-run, **compare two runs** (did
+  quality improve after edits?), delete, export report.
+
+### 8.5 Backend orchestration API (the new dependency)
+A service (FastAPI, sibling to the ingest service) that the frontend talks to:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /documents` | upload → store → create job |
+| `GET /jobs/{id}/events` | **SSE/WS** stream of stage progress |
+| `GET /jobs/{id}` | job status snapshot |
+| `GET /documents/{id}/scorecard` | the assembled scorecard JSON (§1) |
+| `POST /requirements/{id}/review` | run Reviewer on demand |
+| `POST /requirements/{id}/revisions` | accept/edit a rewrite → new revision |
+| `POST /requirements/{id}/rescore` | re-score (a revision or after edit) |
+| `GET /documents` | library listing |
+
+Responsibilities: run the pipeline as an **async job** (background worker),
+**emit progress events**, **persist** documents / scorecards / revisions
+(SQLite or files), and reuse the existing ingest service + agent_server presets +
+llama-server. The current `scripts/produce_scorecard.py` becomes the job body,
+its `log()` calls becoming emitted events.
+
+### 8.6 Build order (lifecycle)
+1. Wrap the producer as a **job with structured progress events** (refactor the
+   stage logs).
+2. **Orchestration API** — upload, job, SSE progress, scorecard serving.
+3. **Monitor view** wired to the SSE stream (highest-value: live processing).
+4. **Ingestion view** (upload → job).
+5. **Review workflow** (on-demand reviewer, accept/re-score) + revisions store.
+6. **Library** + run comparison.
+
+---
+
 ## 7. Grounding notes (so the UI stays honest)
 - Scores are the model's assessment; **surface the justification** so a reviewer
   can judge the judge. Don't present a bare number as ground truth.
