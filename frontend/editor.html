@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reqqa · live requirement assessor</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2b333d;
+    --fg:#e6edf3; --mut:#8b949e; --acc:#58a6ff;
+    --s1:#f85149; --s2:#f0883e; --s3:#d29922; --s4:#3fb950; --s5:#2ea043;
+  }
+  @media (prefers-color-scheme:light){
+    :root{--bg:#f6f8fa;--panel:#fff;--panel2:#f0f3f6;--line:#d0d7de;
+      --fg:#1f2328;--mut:#636c76;--acc:#0969da;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg);color:var(--fg)}
+  header{display:flex;align-items:center;gap:12px;padding:14px 22px;
+    border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .sub{color:var(--mut);font-size:13px}
+  #status{margin-left:auto;font-size:12px;color:var(--mut);display:flex;
+    align-items:center;gap:6px}
+  #dot{width:9px;height:9px;border-radius:50%;background:#6e7681}
+  #dot.on{background:var(--s4)} #dot.busy{background:var(--s3);
+    animation:pulse 1s infinite} @keyframes pulse{50%{opacity:.3}}
+  main{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:22px;
+    max-width:1200px;margin:0 auto}
+  @media (max-width:820px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:16px}
+  label.lbl{font-size:12px;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--mut);font-weight:600}
+  textarea{width:100%;min-height:120px;margin-top:8px;padding:12px;
+    background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+    border-radius:8px;font:15px/1.5 inherit;resize:vertical}
+  textarea:focus{outline:2px solid var(--acc);border-color:var(--acc)}
+  .findings{margin-top:14px;display:flex;flex-wrap:wrap;gap:6px}
+  .chip{font-size:12px;padding:3px 9px;border-radius:20px;
+    background:var(--panel2);border:1px solid var(--line);color:var(--mut)}
+  .chip b{color:var(--fg)}
+  .overall{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+  .overall .num{font-size:34px;font-weight:700}
+  .overall .of{color:var(--mut);font-size:14px}
+  .bars{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+  .b{display:flex;align-items:center;gap:8px;font-size:13px;padding:7px 9px;
+    border-radius:7px;background:var(--panel2);border:1px solid var(--line);
+    opacity:.4;transition:opacity .2s}
+  .b.filled{opacity:1}
+  .b .sc{width:22px;height:22px;border-radius:5px;display:grid;place-items:center;
+    color:#fff;font-weight:700;font-size:12px;flex:none;background:#6e7681}
+  .b .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .b.fast{box-shadow:inset 3px 0 0 var(--acc)}
+  .s1{background:var(--s1)}.s2{background:var(--s2)}.s3{background:var(--s3)}
+  .s4{background:var(--s4)}.s5{background:var(--s5)}
+  .review{margin-top:14px}
+  .rw{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:11px 13px;margin-top:8px}
+  .rw .txt{font-weight:500} .rw .meta{color:var(--mut);font-size:12px;margin-top:4px}
+  .adv{color:var(--s3)}
+  .muted{color:var(--mut);font-size:13px}
+  .tip{color:var(--mut);font-size:12px;margin-top:8px}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>reqqa</h1><span class="sub">live requirement assessor · INCOSE GtWR v4 · E4B</span>
+  <span id="status"><span id="dot"></span><span id="stxt">connecting…</span></span>
+</header>
+<main>
+  <section class="card">
+    <label class="lbl" for="req">Requirement</label>
+    <textarea id="req" placeholder="Type a requirement, e.g. &quot;The system shall respond to user requests within 2 seconds.&quot;"></textarea>
+    <div class="findings" id="findings"></div>
+    <div class="tip">Deterministic term rules flag instantly; the 9 INCOSE
+      characteristic judges (C1–C9) stream in — <b>fast-lane C3·C4·C5·C7 first</b>.</div>
+  </section>
+
+  <section class="card">
+    <div class="overall"><span class="num" id="overall">—</span>
+      <span class="of">/ 5 overall</span>
+      <span class="muted" id="prog" style="margin-left:auto"></span></div>
+    <div class="bars" id="bars"></div>
+    <div class="review" id="review"></div>
+  </section>
+</main>
+
+<script src="/vendor/socket.io.min.js"></script>
+<script>
+const CHARS=[["C1","Necessary"],["C2","Appropriate"],["C3","Unambiguous"],
+  ["C4","Complete"],["C5","Singular"],["C6","Feasible"],["C7","Verifiable"],
+  ["C8","Correct"],["C9","Conforming"]];
+const FAST=new Set(["C3","C4","C5","C7"]);
+const bars={}, barsEl=document.getElementById("bars");
+for(const [id,name] of CHARS){
+  const d=document.createElement("div");
+  d.className="b"+(FAST.has(id)?" fast":"");
+  d.innerHTML=`<span class="sc" id="sc-${id}">·</span>
+    <span class="nm">${id} ${name}</span>`;
+  barsEl.appendChild(d); bars[id]=d;
+}
+const $=id=>document.getElementById(id);
+function resetScores(){
+  for(const [id] of CHARS){const d=bars[id];d.classList.remove("filled");
+    const sc=$("sc-"+id);sc.className="sc";sc.textContent="·";}
+  $("overall").textContent="—";$("review").innerHTML="";$("prog").textContent="";
+}
+function setChar(c){
+  const d=bars[c.id];if(!d)return;d.classList.add("filled");
+  const sc=$("sc-"+c.id);const s=c.score;
+  sc.className="sc"+(s?(" s"+s):"");sc.textContent=s??"?";
+  d.title=c.justification||c.error||"";
+}
+function renderFindings(fs){
+  const el=$("findings");el.innerHTML="";
+  if(!fs.length){el.innerHTML='<span class="chip muted">no term-rule flags</span>';return;}
+  for(const f of fs){
+    const terms=f.matches.map(m=>m.term).join(", ");
+    const c=document.createElement("span");c.className="chip";
+    c.innerHTML=`<b>${f.rule_id}</b> ${f.name}: ${terms}`;el.appendChild(c);
+  }
+}
+function renderReview(r){
+  const el=$("review");if(!r||r.error){el.innerHTML=r&&r.error?
+    `<div class="muted">review error: ${r.error}</div>`:"";return;}
+  let h='<label class="lbl">Suggested rewrite</label>';
+  for(const w of (r.rewrites||[])){
+    h+=`<div class="rw"><div class="txt">${w.text||""}</div>
+      <div class="meta">addresses ${(w.addresses||[]).join(", ")} — ${w.notes||""}</div></div>`;
+  }
+  for(const a of (r.advisories||[])){
+    h+=`<div class="rw"><div class="txt adv">${a.characteristic||""}: ${a.issue||""}</div>
+      <div class="meta">${a.suggestion||""}</div></div>`;
+  }
+  el.innerHTML=h;
+}
+
+const socket=io();
+const dot=$("dot"),stxt=$("stxt");
+socket.on("connect",()=>{dot.className="on";stxt.textContent="connected";});
+socket.on("disconnect",()=>{dot.className="";stxt.textContent="disconnected";});
+let curGen=0;
+socket.on("start",e=>{curGen=e.gen;dot.className="busy";stxt.textContent="assessing…";});
+socket.on("idle",()=>{resetScores();$("findings").innerHTML=
+  '<span class="chip muted">keep typing… (min 12 chars)</span>';
+  dot.className="on";stxt.textContent="connected";});
+socket.on("deterministic",e=>{if(e.gen!==curGen)return;renderFindings(e.findings);});
+socket.on("characteristic",e=>{if(e.gen!==curGen)return;setChar(e.data);
+  $("prog").textContent=`judged ${e.i}/${e.n}`;});
+socket.on("review",e=>{if(e.gen!==curGen)return;renderReview(e.data);});
+socket.on("done",e=>{if(e.gen!==curGen)return;
+  $("overall").textContent=e.overall??"—";$("prog").textContent="done";
+  dot.className="on";stxt.textContent="connected";});
+
+let t=null;
+$("req").addEventListener("input",e=>{
+  clearTimeout(t);const text=e.target.value;
+  t=setTimeout(()=>{resetScores();socket.emit("assess",{text});},600);
+});
+</script>
+</body>
+</html>

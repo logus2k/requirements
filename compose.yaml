@@ -22,5 +22,20 @@ services:
               count: 1
               capabilities: [gpu]
 
+  # Static dashboard (ECharts). Serves frontend/ as-is; app.js fetches
+  # data/index.json (the document picker) then the selected scorecard JSON.
+  # Regenerate the index after adding a scorecard:
+  #   python scripts/build_dashboard_index.py
+  dashboard:
+    image: nginx:1.27-alpine
+    ports:
+      - "5602:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      # Mount the conf DIRECTORY (not the file) so edits are seen live — a
+      # single-file bind mount pins to the inode and goes stale after an
+      # editor's atomic write. Kept outside the web root so it isn't served.
+      - ./nginx:/etc/nginx/conf.d:ro
+
 volumes:
   docling_cache:

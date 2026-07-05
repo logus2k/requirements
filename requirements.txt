@@ -13,3 +13,9 @@ markdown-it-py>=3.0
 fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
+
+# Real-time single-requirement assessor (src/reqqa/realtime.py) — socket.io
+# streaming server, runs on the uvicorn above. (httpx is used by the LLM client;
+# it ships with fastapi's stack. requests/websocket-client are test-client only,
+# not runtime deps.)
+python-socketio>=5.11

@@ -132,30 +132,94 @@ python scripts/produce_scorecard.py <doc.pdf> frontend/data/scorecard_full.json
 
 Env overrides: `INGEST_URL` (`:5601`), `AGENT_SERVER_URL` (`:7701`).
 
-## Component 6 — Frontend
+## Component 6 — Frontend dashboard
 
-Self-contained dashboard in [frontend/](frontend/) using **Apache ECharts 6.1.0**
-(vendored), with light and dark themes. Shows the C1–C9 characteristic radar,
-most-violated rules, score distribution, set-level bar with an overlaps side
-panel, and a sortable requirements table; clicking a row opens a detail drawer
-(per-requirement radar, per-characteristic evidence, provenance, and reviewer
-suggestions).
+Dashboard in [frontend/](frontend/) using **Apache ECharts 6.1.0** (vendored),
+with light and dark themes. Shows the C1–C9 characteristic radar (fill colored by
+the achieved score), most-violated rules, score distribution, set-level bar with
+an overlaps side panel, and a sortable requirements table; clicking a row opens a
+detail drawer (per-requirement radar, per-characteristic evidence, provenance,
+and reviewer suggestions). A **document picker** in the header switches between
+scorecards.
 
-Open `frontend/index.html` (reads `frontend/data/scorecard.js`), or the inlined
-single-file build `frontend/preview.html`.
+### Run it in a container
+
+```bash
+docker compose up -d dashboard          # nginx, serves frontend/ on :5602
+# open http://localhost:5602
+```
+
+The dashboard consumes the producer's `scorecard_full.json` format directly. On
+load, `js/app.js` fetches `data/index.json` (the document list), populates the
+picker, and fetches the selected scorecard.
+
+**To add a document** to the picker:
+
+```bash
+python scripts/produce_scorecard.py <doc.pdf> frontend/data/<name>.json
+python scripts/build_dashboard_index.py     # rescan data/*.json -> data/index.json
+# refresh the browser (nginx serves data/ with no-cache)
+```
+
+### Self-contained build (for sharing / Artifact)
+
+`frontend/preview.html` is a single self-contained file with echarts, one
+scorecard, and app.js inlined — no server needed (opens on `file://`). It runs in
+single-document mode (picker hidden). Rebuild after frontend changes:
+
+```bash
+python scripts/build_preview.py [data/<scorecard>.js]   # default data/scorecard.js
+```
 
 The full **lifecycle app** (drag-drop ingest → streamed live progress → review
 workflow → document library) is specified in
 [specs/requirements_frontend.md](specs/requirements_frontend.md) §8 but not yet
 built — it needs an orchestration API (background jobs + SSE).
 
+## Real-time single-requirement assessor
+
+An interactive editor that assesses **one** requirement as you type — distinct
+from `produce_scorecard.py`, which batches a whole document. There is no ingest or
+segmentation (you write the requirement) and no set-level scoring (that needs the
+whole set); it reuses the same deterministic rules, the 9 C1–C9 judge presets, and
+the reviewer.
+
+Two tiers, matched to latency measured on the active model (**E4B**, warm):
+
+| Tier | What runs | Latency |
+|------|-----------|---------|
+| **Instant** (per keystroke) | deterministic term/symbol rules | ~3 ms |
+| **Debounced** (on pause) | 9 C1–C9 judges, **fast-lane C3·C4·C5·C7 first**, then the reviewer | ~0.5 s/judge · ~2 s headline · ~4.5 s full · ~5.5 s + review |
+
+Results **stream** as each judge returns (the single GPU serializes them, so
+first-score-in-~0.5s beats waiting for a batch), and a new keystroke cancels the
+in-flight assessment. Transport is **socket.io**.
+
+> **Model note:** agent_server presets never select a model — they all run on the
+> single *active* chat model (E4B today). Faster judging can't come from a smaller
+> model per-preset; the only levers are streaming, the fast-lane subset, and
+> deferring the reviewer (see `agent_server/documents/how_to.md`).
+
+Core (`src/reqqa/assess.py`) is transport-agnostic: `assess_requirement()` (full,
+one shot), `iter_assessment()` (streamed events), `review_requirement()` (deferred
+reviewer). The server (`src/reqqa/realtime.py`) serves the editor page and streams
+over socket.io.
+
+```bash
+PYTHONPATH=src uvicorn reqqa.realtime:asgi --port 7801
+# open http://localhost:7801/
+```
+
+Requires `agent_server` (`:7701`) with the INCOSE presets registered (see above)
+and `llama-server` (`:8500`).
+
 ## Repository layout
 
 ```
-src/reqqa/          ingest/ · segment/ · score/ · llm/ · api.py
+src/reqqa/          ingest/ · segment/ · score/ · llm/ · api.py · assess.py · realtime.py
 incose/             catalog.json · rules/ · characteristics/ · judges/
 scripts/            register_agents · register_incose_judges · segment_doc · produce_scorecard
-frontend/           index.html · js/app.js · data/ · vendor/echarts.min.js · preview.html
+frontend/           index.html · js/app.js · editor.html · data/ · vendor/ (echarts, socket.io) · preview.html
 specs/              technical_architecture.md · requirements_frontend.md
 compose.yaml        ingest service (GPU)
 ```

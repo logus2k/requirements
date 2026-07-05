@@ -1,35 +1,40 @@
-/* Requirements Quality dashboard — Apache ECharts 6.1.0, light/dark themes. */
+/* Requirements Quality dashboard — Apache ECharts 6.1.0, light/dark themes.
+ *
+ * Two data modes:
+ *   - multi-document (container): fetch data/index.json, populate the document
+ *     picker, then fetch the selected scorecard JSON.
+ *   - single-document (self-contained build / Artifact): window.SCORECARD is
+ *     inlined; the picker is hidden.
+ *
+ * Consumes the producer's scorecard_full.json format directly: overall_health
+ * and the per-characteristic `rules` alias are derived here if absent. */
 (function () {
-  const D = window.SCORECARD;
   const CHARS = ["C1","C2","C3","C4","C5","C6","C7","C8","C9"];
-  const names = D.characteristic_names;
+  let D, names, health, byId;                 // current scorecard + derived
+  let sortKey = 'overall', sortDir = 1, currentRows = [];
+  let drawerChart = null, openReq = null;
+  const charts = {};
 
   const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const T = () => ({ ink: cssVar('--ink'), ink2: cssVar('--ink2'), muted: cssVar('--muted'),
                      grid: cssVar('--grid'), axis: cssVar('--axis'), accent: cssVar('--accent') });
   const scoreColor = s => cssVar('--s' + Math.max(1, Math.min(5, Math.round(s))));
   const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
   // Requirement text lost its list structure at ingestion: Docling emits bullets
   // as the private-use glyph U+F0B7 (renders blank -> looks like spaces) or other
   // bullet chars. Restore readable line breaks + a bullet marker.
   const fmtText = s => esc(s)
-    .replace(/\s*[\uf0b7\uf0a7\u2022\u25cf\u25aa\u2023\u2043\u2219]\s*/g, '<br>\u2022 ')
+    .replace(/\s*[•●▪‣⁃∙]\s*/g, '<br>• ')
     .replace(/ {2,}/g, '<br>')
-    .replace(/^(?:\s*<br>\s*\u2022?\s*)+/, '');
+    .replace(/^(?:\s*<br>\s*•?\s*)+/, '');
 
-  // ---- header ----
-  document.getElementById('docname').textContent = D.source_file;
-  const health = D.aggregates.overall_health;
   const hEl = document.getElementById('health');
-  hEl.textContent = health.toFixed(2); hEl.style.color = scoreColor(health);
+  const drawer = document.getElementById('drawer');
 
-  // ---- chart instances ----
-  const charts = {};
-  const mk = id => (charts[id] = echarts.init(document.getElementById(id), null, { renderer: 'canvas' }));
-  ['radar','rules','dist','setlevel'].forEach(mk);
-
+  // ---- chart option builders (read current D / names / health / byId) ----
   function radarOpt() {
-    const t = T(), m = D.aggregates.per_characteristic_mean;
+    const t = T(), m = D.aggregates.per_characteristic_mean, c0 = scoreColor(health);
     return { backgroundColor: 'transparent',
       radar: { indicator: CHARS.map(c => ({ name: `${names[c]} (${c})`, max: 5 })),
         axisName: { color: t.ink2, fontSize: 11 }, splitNumber: 5,
@@ -37,8 +42,8 @@
         axisLine: { lineStyle: { color: t.grid } } },
       series: [{ type: 'radar', symbolSize: 4,
         data: [{ value: CHARS.map(c => m[c]),
-          lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent },
-          areaStyle: { color: t.accent, opacity: 0.15 },
+          lineStyle: { color: c0, width: 2 }, itemStyle: { color: c0 },
+          areaStyle: { color: c0, opacity: 0.18 },
           label: { show: true, color: t.ink2, fontSize: 10, formatter: p => (+p.value).toFixed(1) } }] }] };
   }
   function rulesOpt() {
@@ -76,16 +81,24 @@
         data: a.map(x => ({ value: x.score, itemStyle: { color: scoreColor(x.score), borderRadius: [0,4,4,0] } })),
         label: { show: true, position: 'right', color: t.ink2, formatter: '{c}' } }] };
   }
-
-  // ---- overlaps + worst-N table ----
-  const byId = Object.fromEntries(D.requirements.map(r => [r.req_id, r]));
-  document.getElementById('ovcount').textContent = (D.set_level.overlaps || []).length;
+  function reqRadarOpt(r) {
+    const t = T(), c0 = scoreColor(r.overall);
+    return { backgroundColor: 'transparent',
+      radar: { indicator: CHARS.map(c => ({ name: c, max: 5 })), radius: '62%',
+        axisName: { color: t.ink2, fontSize: 10 }, splitNumber: 5,
+        splitLine: { lineStyle: { color: t.grid } }, splitArea: { show: false },
+        axisLine: { lineStyle: { color: t.grid } } },
+      series: [{ type: 'radar', symbolSize: 3,
+        data: [{ value: CHARS.map(c => r.characteristics[c].score || 0),
+          lineStyle: { color: c0, width: 2 }, itemStyle: { color: c0 },
+          areaStyle: { color: c0, opacity: 0.22 },
+          label: { show: true, color: t.ink2, fontSize: 9, formatter: p => p.value } }] }] };
+  }
 
   const badge = s => s == null ? '<span class="muted">–</span>'
     : `<span class="badge" style="background:${scoreColor(s)}">${s}</span>`;
 
-  // sortable table — default worst-first (overall asc)
-  let sortKey = 'overall', sortDir = 1, currentRows = [];
+  // ---- sortable requirements table ----
   const sortVal = (r, k) =>
     k === 'req_id' ? r.req_id :
     k === 'text' ? r.text.toLowerCase() :
@@ -107,33 +120,8 @@
       th.querySelector('.ind').textContent = on ? (sortDir > 0 ? ' ▲' : ' ▼') : '';
     });
   }
-  document.querySelectorAll('th[data-key]').forEach(th =>
-    th.addEventListener('click', () => {
-      const k = th.dataset.key;
-      if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
-      renderTable();
-    }));
-  renderTable();
 
   // ---- detail drawer (with per-requirement radar) ----
-  const drawer = document.getElementById('drawer');
-  let drawerChart = null, openReq = null;
-  document.getElementById('drawerClose').onclick = () => drawer.classList.remove('open');
-
-  function reqRadarOpt(r) {
-    const t = T();
-    return { backgroundColor: 'transparent',
-      radar: { indicator: CHARS.map(c => ({ name: c, max: 5 })), radius: '62%',
-        axisName: { color: t.ink2, fontSize: 10 }, splitNumber: 5,
-        splitLine: { lineStyle: { color: t.grid } }, splitArea: { show: false },
-        axisLine: { lineStyle: { color: t.grid } } },
-      series: [{ type: 'radar', symbolSize: 3,
-        data: [{ value: CHARS.map(c => r.characteristics[c].score || 0),
-          lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent },
-          areaStyle: { color: t.accent, opacity: 0.18 },
-          label: { show: true, color: t.ink2, fontSize: 9, formatter: p => p.value } }] }] };
-  }
-
   function openDrawer(r) {
     openReq = r;
     document.getElementById('drawerBody').innerHTML = `
@@ -144,7 +132,7 @@
       ${CHARS.map(c => { const a = r.characteristics[c]; return `
         <div class="cchar"><div class="top">
           ${badge(a.score)}<span class="name">${names[c]} (${c})</span>
-          <span class="rules">${(a.rules || []).join(', ')}</span></div>
+          <span class="rules">${(a.rules || a.rules_triggered || []).join(', ')}</span></div>
           ${a.evidence ? `<div class="ev">“${a.evidence}”</div>` : ''}
           <div class="just">${a.justification || ''}</div></div>`; }).join('')}
       ${r.review ? `<h3 style="margin-top:14px">Suggested improvements</h3>
@@ -155,10 +143,6 @@
     drawerChart.setOption(reqRadarOpt(r));
     drawer.classList.add('open');
   }
-  document.getElementById('reqrows').addEventListener('click', e => {
-    const tr = e.target.closest('tr.req'); if (!tr) return;
-    openDrawer(currentRows[+tr.dataset.i]);
-  });
 
   // ---- overlaps side panel ----
   function openOverlaps() {
@@ -175,9 +159,7 @@
           <div class="just">${b ? esc(b.text.slice(0, 96)) : o.b_id}</div></div>`; }).join('')}`;
     drawer.classList.add('open');
   }
-  document.getElementById('ovBtn').addEventListener('click', openOverlaps);
 
-  // ---- render + theme ----
   function renderAll() {
     charts.radar.setOption(radarOpt(), true);
     charts.rules.setOption(rulesOpt(), true);
@@ -185,7 +167,39 @@
     charts.setlevel.setOption(setOpt(), true);
     if (openReq && drawerChart) drawerChart.setOption(reqRadarOpt(openReq), true);
   }
-  renderAll();
+
+  // ---- load a scorecard (producer format) and (re)render everything ----
+  function loadScorecard(sc) {
+    D = sc;
+    names = D.characteristic_names;
+    const m = D.aggregates.per_characteristic_mean;
+    health = (D.aggregates.overall_health != null)
+      ? D.aggregates.overall_health
+      : Math.round(mean(CHARS.map(c => m[c])) * 100) / 100;
+    byId = Object.fromEntries(D.requirements.map(r => [r.req_id, r]));
+    hEl.textContent = health.toFixed(2); hEl.style.color = scoreColor(health);
+    document.getElementById('ovcount').textContent = (D.set_level.overlaps || []).length;
+    drawer.classList.remove('open'); openReq = null;
+    renderAll();
+    renderTable();
+  }
+
+  // ---- one-time wiring (independent of which document is loaded) ----
+  ['radar','rules','dist','setlevel'].forEach(id =>
+    charts[id] = echarts.init(document.getElementById(id), null, { renderer: 'canvas' }));
+
+  document.querySelectorAll('th[data-key]').forEach(th =>
+    th.addEventListener('click', () => {
+      const k = th.dataset.key;
+      if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+      renderTable();
+    }));
+  document.getElementById('reqrows').addEventListener('click', e => {
+    const tr = e.target.closest('tr.req'); if (!tr) return;
+    openDrawer(currentRows[+tr.dataset.i]);
+  });
+  document.getElementById('ovBtn').addEventListener('click', openOverlaps);
+  document.getElementById('drawerClose').onclick = () => drawer.classList.remove('open');
   document.getElementById('themeBtn').onclick = () => {
     const h = document.documentElement;
     h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -196,4 +210,41 @@
     Object.values(charts).forEach(c => c.resize());
     if (drawerChart) drawerChart.resize();
   });
+
+  // ---- document picker (the subtitle select) ----
+  const sel = document.getElementById('docsel');
+  const measureCtx = document.createElement('canvas').getContext('2d');
+  // Size the select to its selected option so the caret sits right after the
+  // current document's title (a native select otherwise sizes to the widest
+  // option). +24px leaves room for the caret and a little slack.
+  function fitDocSel() {
+    const opt = sel.options[sel.selectedIndex];
+    if (!opt) return;
+    const cs = getComputedStyle(sel);
+    measureCtx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    sel.style.width = Math.ceil(measureCtx.measureText(opt.text).width) + 24 + 'px';
+  }
+  const showOnly = txt => { sel.innerHTML = `<option>${esc(txt)}</option>`; fitDocSel(); };
+
+  // ---- boot: pick data mode ----
+  if (window.SCORECARD) {                      // single-document inlined build
+    showOnly(window.SCORECARD.source_file);
+    loadScorecard(window.SCORECARD);
+  } else {                                     // multi-document: fetch the index
+    const loadDoc = file => fetch('data/' + file)
+      .then(r => { if (!r.ok) throw new Error(r.status + ' ' + file); return r.json(); })
+      .then(loadScorecard)
+      .catch(e => { showOnly('failed to load ' + file); console.error(e); });
+
+    fetch('data/index.json')
+      .then(r => { if (!r.ok) throw new Error('index.json ' + r.status); return r.json(); })
+      .then(docs => {
+        if (!Array.isArray(docs) || !docs.length) { showOnly('no documents in data/index.json'); return; }
+        sel.innerHTML = docs.map(d => `<option value="${esc(d.file)}">${esc(d.name)}</option>`).join('');
+        fitDocSel();
+        sel.onchange = () => { fitDocSel(); loadDoc(sel.value); };
+        loadDoc(docs[0].file);
+      })
+      .catch(e => { showOnly('failed to load data/index.json'); console.error(e); });
+  }
 })();

@@ -28,6 +28,18 @@
   .health .l{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
   .toggle{border:1px solid var(--border);background:var(--surface);color:var(--ink);
     border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px}
+  /* The document subtitle IS the picker: a native select styled as plain title
+     text, with a caret drawn by the wrapper at the right of the selected name.
+     app.js sizes the select to the selected option so the caret hugs the text. */
+  .doctitle{position:relative;display:inline-flex;align-items:center;margin-top:1px}
+  .doctitle::after{content:'▾';position:absolute;right:5px;pointer-events:none;
+    color:var(--muted);font-size:11px}
+  .doctitle select{appearance:none;-webkit-appearance:none;background:transparent;border:none;
+    outline:none;color:var(--ink2);font:inherit;font-size:13px;line-height:1.3;
+    padding:1px 22px 1px 0;margin:0;max-width:560px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;cursor:pointer}
+  .doctitle select:hover{color:var(--ink)}
+  .doctitle select:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
   main{padding:18px 22px;max-width:1180px;margin:0 auto}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
@@ -64,7 +76,8 @@
 </head>
 <body>
 <header>
-  <div><h1>Requirements Quality — INCOSE GtWR v4</h1><div class="doc" id="docname"></div></div>
+  <div><h1>Requirements Quality — INCOSE GtWR v4</h1>
+    <div class="doctitle"><select id="docsel" title="Select document"></select></div></div>
   <div class="health"><div class="n" id="health"></div><div class="l">avg quality / 5</div></div>
   <button class="toggle" id="themeBtn">◐ Theme</button>
 </header>
@@ -101,7 +114,8 @@
 <div class="drawer" id="drawer"><button class="close" id="drawerClose">✕</button>
   <div id="drawerBody"></div></div>
 <script src="vendor/echarts.min.js"></script>
-<script src="data/scorecard.js"></script>
+<!-- Multi-document: app.js fetches data/index.json then the selected scorecard.
+     The self-contained build (build_preview.py) injects window.SCORECARD here. -->
 <script src="js/app.js"></script>
 </body>
 </html>
