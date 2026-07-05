@@ -1,5 +1,10 @@
-"""Orchestration API — upload a document, run the pipeline as an async job,
-stream progress, serve the scorecard and library (spec §8.5).
+"""reqoach — the single-container backend: static dashboard + editor + the
+orchestration API + socket.io (job progress AND live single-requirement assess).
+
+One FastAPI app serves the static frontend (dashboard, editor, vendored libs,
+data/) and the REST API; one socket.io server carries both the job-progress
+stream (`join` → rooms) and the live assessor (`assess` → per-client). This is
+the same-origin backend nginx routes `/reqoach/` and `/reqoach/socket.io/` to.
 
 Wraps `reqqa.jobs.iter_job` in a background worker and exposes:
 
@@ -16,7 +21,8 @@ Live progress also streams over **socket.io**: a client emits
 `job_error`) as the job runs. The job runs in a worker thread; its events are
 marshalled onto the asyncio loop with `run_coroutine_threadsafe`.
 
-Run:  PYTHONPATH=src uvicorn reqqa.orchestration_api:asgi --port 7802
+Run:  PYTHONPATH=src uvicorn reqqa.orchestration_api:asgi --host 0.0.0.0 --port 7802
+(or via the `reqoach` compose service, which is how it runs in production)
 
 Persistence is the filesystem under REQQA_STORE (default <repo>/store):
   store/<doc_id>/source.<ext>, scorecard.json, meta.json
@@ -33,13 +39,18 @@ from dataclasses import dataclass, field
 
 import socketio
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
+from reqqa.assess import iter_assessment
 from reqqa.ingest.dispatch import SUPPORTED_EXTENSIONS
 from reqqa.jobs import JobOptions, iter_job
+from reqqa.llm.client import AgentServerClient
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 STORE = os.environ.get("REQQA_STORE", os.path.join(_REPO, "store"))
+_FRONTEND = os.path.join(_REPO, "frontend")
 
 
 @dataclass
@@ -88,7 +99,7 @@ class JobManager:
         job.status = "running"
         self._emit(job, {"type": "stage", "stage": "queued", "status": "done"})
         try:
-            for event in iter_job(path, options=options):
+            for event in iter_job(path, options=options, source_file=job.source_file):
                 self._emit(job, event)
                 if event.get("type") == "scorecard":
                     self._persist_scorecard(job, event["data"])
@@ -122,7 +133,8 @@ class JobManager:
 
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-api = FastAPI(title="reqqa-orchestration")
+api = FastAPI(title="reqoach")
+api.add_middleware(GZipMiddleware, minimum_size=1024)   # big scorecard JSON
 jm = JobManager(sio)
 
 
@@ -209,5 +221,62 @@ async def join(sid, data):
     for event in list(job.events):
         await sio.emit(event["type"], {**event, "job_id": job_id, "replay": True}, to=sid)
 
+
+# --- Live single-requirement assessor, folded onto the SAME socket.io server ---
+# The dashboard/monitor uses `join` (job rooms); the editor uses `assess` (per-sid).
+# One server, one origin, one container.
+_assess_gen: dict[str, int] = {}
+_assess_client = AgentServerClient()
+
+
+@sio.event
+async def connect(sid, environ):
+    _assess_gen[sid] = 0
+
+
+@sio.event
+async def disconnect(sid):
+    _assess_gen.pop(sid, None)
+
+
+@sio.event
+async def assess(sid, data):
+    """Stream a single requirement's live assessment; a newer `assess` from the
+    same client supersedes the in-flight one (generation counter)."""
+    text = ((data or {}).get("text") or "").strip()
+    review = bool((data or {}).get("review", True))
+    gen = _assess_gen.get(sid, 0) + 1
+    _assess_gen[sid] = gen
+    if len(text) < 12:                       # matches verify.MIN_TEXT_LEN
+        await sio.emit("idle", {"reason": "too_short"}, to=sid)
+        return
+    await sio.emit("start", {"gen": gen}, to=sid)
+
+    loop = asyncio.get_running_loop()
+    gen_iter = iter_assessment(text, client=_assess_client, review=review)
+    sentinel = object()
+
+    def _next():
+        try:
+            return next(gen_iter)
+        except StopIteration:
+            return sentinel
+
+    while True:
+        if _assess_gen.get(sid) != gen:      # superseded
+            gen_iter.close()
+            return
+        event = await loop.run_in_executor(None, _next)
+        if event is sentinel:
+            break
+        if _assess_gen.get(sid) != gen:
+            return
+        await sio.emit(event["type"], {**event, "gen": gen}, to=sid)
+
+
+# Serve the static frontend (dashboard, editor, vendored libs, existing data/)
+# from the SAME origin. Mounted LAST so it never shadows the API routes above;
+# socket.io (/socket.io/) is handled by the ASGIApp wrapper before FastAPI.
+api.mount("/", StaticFiles(directory=_FRONTEND, html=True), name="frontend")
 
 asgi = socketio.ASGIApp(sio, other_asgi_app=api)

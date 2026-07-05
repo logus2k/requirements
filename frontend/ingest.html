@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reqoach · assess a document</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232d;--line:#2b333d;--fg:#e6edf3;
+    --mut:#8b949e;--acc:#58a6ff;--ok:#3fb950;--err:#f85149;}
+  @media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--panel:#fff;--panel2:#f0f3f6;
+    --line:#d0d7de;--fg:#1f2328;--mut:#636c76;--acc:#0969da;}}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+  header{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .sub{color:var(--mut);font-size:13px}
+  header nav{margin-left:auto;display:flex;gap:16px;font-size:13px}
+  header nav a{color:var(--acc);text-decoration:none}
+  main{max-width:640px;margin:40px auto;padding:0 22px}
+  #drop{border:2px dashed var(--line);border-radius:14px;padding:48px 24px;text-align:center;
+    background:var(--panel);transition:border-color .15s,background .15s;cursor:pointer}
+  #drop.over{border-color:var(--acc);background:var(--panel2)}
+  #drop .big{font-size:17px;font-weight:600;margin-bottom:6px}
+  #drop .hint{color:var(--mut);font-size:13px}
+  .exts{margin-top:10px;color:var(--mut);font-size:12px}
+  .opts{display:flex;gap:20px;justify-content:center;margin:18px 0;font-size:14px}
+  .opts label{display:flex;align-items:center;gap:7px;cursor:pointer}
+  #msg{margin-top:18px;text-align:center;font-size:14px;min-height:22px}
+  #msg.err{color:var(--err)} #msg.ok{color:var(--ok)}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--mut);border-top-color:var(--acc);
+    border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  input[type=file]{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>reqoach</h1><span class="sub">assess a requirements document</span>
+  <nav><a href="index.html">Dashboard</a><a href="editor.html">Live editor</a></nav>
+</header>
+<main>
+  <div id="drop">
+    <div class="big">Drop a requirements document here</div>
+    <div class="hint">or click to choose a file</div>
+    <div class="exts">Markdown · PDF · DOCX · HTML · PPTX</div>
+    <input type="file" id="file" accept=".md,.markdown,.pdf,.docx,.html,.htm,.pptx">
+  </div>
+  <div class="opts">
+    <label><input type="checkbox" id="review" checked> Suggest fixes (reviewer)</label>
+    <label><input type="checkbox" id="setlevel" checked> Set-level analysis (C10–C15)</label>
+  </div>
+  <div id="msg"></div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const drop=$("drop"), fileInput=$("file"), msg=$("msg");
+const OK_EXT=[".md",".markdown",".pdf",".docx",".html",".htm",".pptx"];
+
+drop.addEventListener("click",()=>fileInput.click());
+fileInput.addEventListener("change",e=>{ if(e.target.files[0]) upload(e.target.files[0]); });
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f) upload(f); });
+
+function setMsg(t,cls){ msg.className=cls||""; msg.innerHTML=t; }
+
+async function upload(file){
+  const dot=file.name.lastIndexOf("."); const ext=dot<0?"":file.name.slice(dot).toLowerCase();
+  if(!OK_EXT.includes(ext)){ setMsg(`Unsupported file type <b>${ext||"?"}</b>. Use ${OK_EXT.join(", ")}.`,"err"); return; }
+  setMsg(`<span class="spin"></span>Uploading <b>${file.name}</b> and starting assessment…`,"");
+  const fd=new FormData(); fd.append("file",file);
+  const qs=`?review=${$("review").checked}&set_level=${$("setlevel").checked}`;
+  try{
+    const r=await fetch("documents"+qs,{method:"POST",body:fd});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); setMsg(`Upload failed (${r.status}): ${d.detail||"error"}`,"err"); return; }
+    const {job_id}=await r.json();
+    setMsg(`<span class="spin"></span>Assessment started — opening live monitor…`,"ok");
+    location.href=`monitor.html?job=${job_id}`;
+  }catch(e){ setMsg(`Network error: ${e.message}`,"err"); }
+}
+</script>
+</body>
+</html>

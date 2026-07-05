@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: reqqa-ingest:latest
+    restart: unless-stopped
     ports:
       - "5601:5601"
     environment:
@@ -22,20 +23,27 @@ services:
               count: 1
               capabilities: [gpu]
 
-  # Static dashboard (ECharts). Serves frontend/ as-is; app.js fetches
-  # data/index.json (the document picker) then the selected scorecard JSON.
-  # Regenerate the index after adding a scorecard:
-  #   python scripts/build_dashboard_index.py
-  dashboard:
-    image: nginx:1.27-alpine
-    ports:
-      - "5602:80"
+  # reqoach: single-container backend — serves the static dashboard + editor,
+  # the orchestration REST API, AND socket.io (job progress + live assess), all
+  # on one origin (host :7802). Replaces the old static-nginx `dashboard`.
+  # Markdown is ingested in-process; PDF/DOCX are delegated to `ingest` (:5601).
+  reqoach:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestration
+    image: reqqa-orchestration:latest
+    restart: unless-stopped
+    # Host networking: binds host :7802 (nginx upstream) and reaches
+    # agent_server/llama-server/ingest on localhost with no rewiring.
+    network_mode: host
+    environment:
+      AGENT_SERVER_URL: http://localhost:7701
+      LLAMA_SERVER_URL: http://localhost:8500
+      INGEST_URL: http://localhost:5601
+      REQQA_STORE: /app/store
     volumes:
-      - ./frontend:/usr/share/nginx/html:ro
-      # Mount the conf DIRECTORY (not the file) so edits are seen live — a
-      # single-file bind mount pins to the inode and goes stale after an
-      # editor's atomic write. Kept outside the web root so it isn't served.
-      - ./nginx:/etc/nginx/conf.d:ro
+      - ./store:/app/store                       # persist jobs + scorecards
+      - ./frontend/data:/app/frontend/data:ro    # existing scorecards in the picker
 
 volumes:
   docling_cache:

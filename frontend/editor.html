@@ -88,7 +88,7 @@
   </section>
 </main>
 
-<script src="/vendor/socket.io.min.js"></script>
+<script src="vendor/socket.io.min.js"></script>
 <script>
 const CHARS=[["C1","Necessary"],["C2","Appropriate"],["C3","Unambiguous"],
   ["C4","Complete"],["C5","Singular"],["C6","Feasible"],["C7","Verifiable"],
@@ -138,7 +138,11 @@ function renderReview(r){
   el.innerHTML=h;
 }
 
-const socket=io();
+// Derive the socket.io path from where this page is served so it works both at
+// the root (local :7802) and under the /reqoach/ proxy prefix. The page sits at
+// the app root, so its directory is the mount base.
+const _base=location.pathname.replace(/[^/]*$/,"");
+const socket=io({path:_base+"socket.io"});
 const dot=$("dot"),stxt=$("stxt");
 socket.on("connect",()=>{dot.className="on";stxt.textContent="connected";});
 socket.on("disconnect",()=>{dot.className="";stxt.textContent="disconnected";});

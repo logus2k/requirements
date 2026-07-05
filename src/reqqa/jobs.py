@@ -130,12 +130,18 @@ def _aggregates(records: list[dict]) -> dict:
 
 
 def iter_job(path: str, options: JobOptions | None = None,
-             client: AgentServerClient | None = None) -> Iterator[dict]:
-    """Run the full pipeline for one document, yielding events as it goes."""
+             client: AgentServerClient | None = None,
+             source_file: str | None = None) -> Iterator[dict]:
+    """Run the full pipeline for one document, yielding events as it goes.
+
+    `source_file` is the display name recorded in the scorecard (the original
+    upload filename). Defaults to the basename of `path` — but when the caller
+    stored the upload under a synthetic name (e.g. `source.md`), it should pass
+    the real filename so the dashboard/library shows it."""
     opts = options or JobOptions()
     client = client or AgentServerClient()
     t0 = time.time()
-    source_file = os.path.basename(path)
+    source_file = source_file or os.path.basename(path)
 
     # 1. Ingest
     yield {"type": "stage", "stage": "ingest", "status": "start"}
@@ -236,12 +242,13 @@ def iter_job(path: str, options: JobOptions | None = None,
 
 def run_job(path: str, emit: Callable[[dict], None] | None = None,
             options: JobOptions | None = None,
-            client: AgentServerClient | None = None) -> dict:
+            client: AgentServerClient | None = None,
+            source_file: str | None = None) -> dict:
     """Run the job to completion, forwarding each event to `emit`, and return
     the assembled scorecard. Convenience wrapper over `iter_job` for callers
     that want a callback + final result rather than a generator."""
     scorecard: dict = {}
-    for event in iter_job(path, options=options, client=client):
+    for event in iter_job(path, options=options, client=client, source_file=source_file):
         if event.get("type") == "scorecard":
             scorecard = event["data"]
         if emit is not None:
