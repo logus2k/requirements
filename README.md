@@ -1,119 +1,111 @@
-# Requirements Quality Analyzer (reqqa)
+# reqoach — Requirements Quality Analyzer
 
-Ingest a requirements document, split it into discrete requirements, score each
-against the **INCOSE Guide to Writing Requirements (GtWR v4, INCOSE-TP-2010-006-04)**,
-propose fixes for the weak ones, and visualize the whole set.
+**reqoach** ingests a requirements document, splits it into discrete requirements,
+scores each against the **INCOSE Guide to Writing Requirements (GtWR v4,
+INCOSE-TP-2010-006-04)**, proposes fixes for the weak ones, and visualizes the
+whole set — with a live editor that assesses a single requirement as you type.
+
+> **Live:** [logus2k.com/reqoach](https://logus2k.com/reqoach/) — browsing assessed
+> results is public; starting an assessment (upload / live editor) requires Google
+> sign-in.
 
 Pipeline: **ingest → segment → score → review → visualize**.
+Runs entirely on a **local LLM** (Gemma 4 E4B) — no data leaves the host.
 
 Design docs: [specs/technical_architecture.md](specs/technical_architecture.md)
 and [specs/requirements_frontend.md](specs/requirements_frontend.md).
 
-## Architecture at a glance
+---
+
+## What it does
 
 | Stage | Where | What it does |
 |-------|-------|--------------|
-| **1 · Ingest** | [src/reqqa/ingest/](src/reqqa/ingest/) + `POST /ingest` (Docker) | Document → normalized `SourceItem`s with provenance |
-| **2 · Segment** | [src/reqqa/segment/](src/reqqa/segment/) | LLM identifies discrete requirements (identify → gate → assemble → dedup) |
-| **3 · Score** | [src/reqqa/score/](src/reqqa/score/) | 9 per-characteristic LLM judges (C1–C9) + deterministic term rules |
-| **4 · Set-level** | [src/reqqa/score/setlevel.py](src/reqqa/score/setlevel.py) | C10–C15 over the whole set (reranker overlap → LLM confirm → set judge) |
-| **5 · Review** | [incose/judges/reviewer.md](incose/judges/reviewer.md) | Proposes rewrites/advisories for defective requirements |
-| **6 · Visualize** | [frontend/](frontend/) | ECharts 6.1.0 dashboard (radar, rule bar, distribution, set-level, table) |
+| **1 · Ingest** | [src/reqqa/ingest/](src/reqqa/ingest/) | Document (`.md/.pdf/.docx/.html/.pptx`) → normalized `SourceItem`s with provenance. Markdown parsed in-process; other formats via a GPU **Docling** service. |
+| **2 · Segment** | [src/reqqa/segment/](src/reqqa/segment/) | LLM identifies discrete requirements (identify → gate → assemble → dedup). Anti-hallucination: every requirement must trace to its source block. |
+| **3 · Score** | [src/reqqa/score/](src/reqqa/score/) | 9 per-characteristic LLM judges (C1–C9) + 15 deterministic term-list rules. |
+| **4 · Set-level** | [src/reqqa/score/setlevel.py](src/reqqa/score/setlevel.py) | C10–C15 across the whole set (reranker overlap → LLM confirm → set judge). |
+| **5 · Review** | [incose/judges/reviewer.md](incose/judges/reviewer.md) | Rewrites + advisories for defective requirements. |
+| **6 · Visualize** | [frontend/](frontend/) | ECharts dashboard (radar, rule bar, distribution, set-level, sortable table + detail drawer). |
 
-Key design decisions:
-- **The LLM is the sole requirement identifier — no regex.** Requirements are
-  written too many ways to intercept structurally.
-- **Judges score on a 1–5 scale, `batch=1`** (one requirement per call). Batching
-  corrupts scores; the binary pass/fail is derived in code.
-- **Local LLM only.** Judges/identifiers are agent_server presets (Gemma 4 E4B,
-  `:7701`); embeddings + rerank run on llama-server (`:8500`).
+**Key design decisions**
+- **The LLM is the sole requirement identifier — no regex.** Requirements are written too many ways to intercept structurally.
+- **Judges score 1–5, `batch=1`** (one requirement per call). Batching corrupts scores; pass/fail is derived in code.
+- **Local LLM only.** Judges/identifiers are agent_server presets (Gemma 4 E4B, `:7701`); embeddings + rerank run on llama-server (`:8500`). Presets never pick a model — the whole stack runs on the one active model.
 
-## Dependencies
+---
 
-- **Ingestion service** — Docker + NVIDIA container toolkit (GPU Docling).
-- **agent_server** (`:7701`) — hosts the LLM presets. Register them once with the
-  scripts below.
-- **llama-server** (`:8500`) — bge-m3 embeddings + bge-reranker, used by set-level
-  overlap detection and segmentation dedup.
+## Using reqoach
 
-## Component 1 — Ingestion service
+There are two front doors — the interactive **app** and the **batch script**.
 
-A GPU-enabled FastAPI service that turns a document (`.md`, `.pdf`, `.docx`,
-`.html`/`.htm`, `.pptx`) into a normalized stream of `SourceItem`s with
-provenance. Markdown is parsed directly; all other formats go through Docling.
+### The app (`reqoach`) — upload, watch live, browse
 
-> **Bullet glyphs:** Docling emits Word/PDF symbol-font bullets as private-use
-> glyphs (U+F0xx, e.g. U+F0B7 — renders blank). `docling_adapter._normalize_text`
-> maps that block to `•` at ingestion so downstream text is clean.
+One container serves the entire UI + API + realtime streaming on one origin
+(host `:7802`; public at `/reqoach/`):
 
-### Prerequisite: download Docling models locally (once)
+- **Dashboard** ([frontend/index.html](frontend/index.html)) — the results viewer: C1–C9 radar,
+  most-violated rules, score distribution, set-level panel, sortable requirements
+  table with a per-requirement detail drawer. *Public.*
+- **Ingestion** ([frontend/ingest.html](frontend/ingest.html)) — drag-drop a document → creates an
+  async **job** → redirects to the live monitor. *Gated.*
+- **Monitor** ([frontend/monitor.html](frontend/monitor.html)) — fills in live as the pipeline runs:
+  stage strip, charts as running aggregates, and the requirements table appending
+  each requirement the moment its 9 judges finish. *Gated.*
+- **Live editor** ([frontend/editor.html](frontend/editor.html)) — assess a **single** requirement as
+  you type: instant deterministic flags, then C1–C9 stream in (fast-lane first),
+  then a suggested rewrite. *Gated.*
 
-The image is built **offline** — it COPYs Docling's layout + TableFormer models
-from `models/docling/` rather than downloading them at build time. Populate that
-folder once (requires the image to exist, or any Docling install):
+Everything streams over **socket.io** (job progress via `join`, live assessment
+via `assess`).
 
-```bash
-mkdir -p models/docling
-docker run --rm -v "$PWD/models/docling:/out" reqqa-ingest:latest \
-  python3.12 -c "from pathlib import Path; from docling.utils.model_downloader import download_models; \
-download_models(output_dir=Path('/out'), progress=True, with_rapidocr=False, with_easyocr=False)"
-```
+### The batch script
 
-This writes ~1.2 GB (layout-heron, TableFormer, CodeFormulaV2, figure
-classifier). OCR models are skipped; enable OCR by re-downloading with
-`with_rapidocr=True` and setting `DOCLING_OCR=1`.
-
-### Build & run
+Runs the whole pipeline for one document and writes a dashboard-ready scorecard:
 
 ```bash
-docker compose build ingest
-docker compose up -d ingest
-curl -s http://localhost:5601/health
+python scripts/produce_scorecard.py <doc.pdf> frontend/data/scorecard_full.json
 ```
 
-### Ingest a file
+---
+
+## Deploy
+
+Four moving parts. The first three are this repo's `compose.yaml`; the LLM
+backends are shared services.
+
+| Service | Port | Role | Restart |
+|---|---|---|---|
+| **reqoach** | 7802 | single-container app: static UI + orchestration API + socket.io | `unless-stopped` |
+| **ingest** | 5601 | GPU Docling service for PDF/DOCX/HTML/PPTX (markdown bypasses it) | `unless-stopped` |
+| **agent_server** | 7701 | hosts the LLM presets (Gemma 4 E4B) | shared |
+| **llama-server** | 8500 | bge-m3 embeddings + bge-reranker | shared |
 
 ```bash
-curl -s -X POST http://localhost:5601/ingest -F "file=@path/to/doc.pdf" | jq
+docker compose up -d ingest reqoach     # build + run the two app containers
+# reqoach: http://localhost:7802/   (public entry: the dashboard)
 ```
 
-Response: `{ source_file, format, item_count, items: [ { text, block_type,
-section_path, source_file, order, page, bbox, char_span, heading_level } ] }`.
+- **`reqoach`** ([Dockerfile.orchestration](Dockerfile.orchestration)) is a slim image (no Docling —
+  markdown is parsed in-process, PDFs delegate to `ingest`). It uses
+  `network_mode: host` so it binds `:7802` and reaches agent_server / llama-server
+  / ingest on `localhost` with no rewiring. Persists jobs under `store/`.
+- **`ingest`** bakes Docling's layout + TableFormer models offline (see below).
 
-### Notes
+### Public routing & auth (via the logus2k.com reverse proxy)
 
-- GPU: requires the NVIDIA container toolkit (see `compose.yaml`). The service
-  loads Docling's torch models on GPU.
-- `page`/`bbox` are populated for paginated sources (PDF); `char_span` is
-  populated for text sources (Markdown). This is the provenance downstream
-  span-grounding relies on.
-- Ingestion does **not** decide what is a requirement — that is Component 2.
+The app is fronted at `/reqoach/`. Browsing finished results is **public**;
+anything that drives the LLM is **gated** to a single Google identity:
 
-## Component 2 — Segmentation
+| Public | Gated (Google sign-in) |
+|---|---|
+| `/reqoach/` dashboard | `/reqoach/ingest.html` (upload UI) |
+| `GET /documents` (library) | `/reqoach/editor.html`, `/reqoach/monitor.html` |
+| scorecard JSON | `POST /documents` (upload) |
+|  | `/reqoach/socket.io/` (carries `assess` + `join`) |
 
-The LLM identifies discrete requirements from the ingested item stream:
-**identify** (chunked, LLM-only) → **gate** (a judge drops non-requirements and
-refines through a bounded loop) → **assemble** (reassemble requirements split
-across chunks by author ID) → **dedup** (reranker-based, with a length guard).
-Each `DiscreteRequirement` carries provenance and lineage.
-
-```bash
-# ingest + segment one document, print identified requirements
-python scripts/segment_doc.py path/to/doc.pdf [--json]
-```
-
-## Components 3–5 — Scoring, set-level, review
-
-Per-requirement scoring runs 9 LLM judges (one per individual characteristic
-C1–C9) plus deterministic term-list rules from [incose/catalog.json](incose/catalog.json)
-(42 rules R1–R42 + 15 characteristics). Set-level (C10–C15) finds overlap
-candidates with the reranker, confirms them with the LLM, then runs the set
-judge. Defective requirements (any characteristic ≤ 3) go to the Reviewer for
-suggested rewrites/advisories.
-
-The INCOSE knowledge base lives in [incose/](incose/): `catalog.json`,
-`rules/*.md`, `characteristics/*.md`, and `judges/*.md` (the **static**
-per-characteristic judge prompts — no runtime assembly).
+Browser clients connect socket.io with a path derived from the mount point
+(`io({path: base + "socket.io"})`) so they work at the root and under `/reqoach/`.
 
 ### Register the LLM presets (once, idempotent)
 
@@ -122,104 +114,108 @@ python scripts/register_agents.py          # identify/judge/refine/table/assembl
 python scripts/register_incose_judges.py   # incose_c1_necessary … c9, set_judge, reviewer
 ```
 
-### Produce a full scorecard
+---
 
-Runs the whole pipeline end to end and writes a frontend-ready JSON:
+## Components in detail
 
-```bash
-python scripts/produce_scorecard.py <doc.pdf> frontend/data/scorecard_full.json
-```
+### 1 · Ingestion service (`ingest`, `:5601`)
 
-Env overrides: `INGEST_URL` (`:5601`), `AGENT_SERVER_URL` (`:7701`).
+A GPU FastAPI service turning a document into a normalized `SourceItem` stream
+with provenance. Markdown is parsed directly; other formats go through Docling.
 
-## Component 6 — Frontend dashboard
+> **Bullet glyphs:** Docling emits Word/PDF symbol-font bullets as private-use
+> glyphs (U+F0xx — renders blank). `docling_adapter._normalize_text` maps that
+> block to `•` at ingestion.
 
-Dashboard in [frontend/](frontend/) using **Apache ECharts 6.1.0** (vendored),
-with light and dark themes. Shows the C1–C9 characteristic radar (fill colored by
-the achieved score), most-violated rules, score distribution, set-level bar with
-an overlaps side panel, and a sortable requirements table; clicking a row opens a
-detail drawer (per-requirement radar, per-characteristic evidence, provenance,
-and reviewer suggestions). A **document picker** in the header switches between
-scorecards.
-
-### Run it in a container
+**Prerequisite — download Docling models once** (image is built offline, COPYing
+from `models/docling/`):
 
 ```bash
-docker compose up -d dashboard          # nginx, serves frontend/ on :5602
-# open http://localhost:5602
+mkdir -p models/docling
+docker run --rm -v "$PWD/models/docling:/out" reqqa-ingest:latest \
+  python3.12 -c "from pathlib import Path; from docling.utils.model_downloader import download_models; \
+download_models(output_dir=Path('/out'), progress=True, with_rapidocr=False, with_easyocr=False)"
 ```
 
-The dashboard consumes the producer's `scorecard_full.json` format directly. On
-load, `js/app.js` fetches `data/index.json` (the document list), populates the
-picker, and fetches the selected scorecard.
+~1.2 GB (layout-heron, TableFormer, CodeFormulaV2, figure classifier). OCR off by
+default; enable with `with_rapidocr=True` + `DOCLING_OCR=1`. `page`/`bbox` are set
+for PDFs; `char_span` for text sources — the provenance downstream grounding relies on.
 
-**To add a document** to the picker:
+### 2 · Segmentation
+
+**identify** (chunked, LLM-only) → **gate** (a judge drops non-requirements and
+refines through a bounded loop) → **assemble** (reassemble requirements split
+across chunks by author ID) → **dedup** (reranker-based, length-guarded). Each
+`DiscreteRequirement` carries provenance + lineage.
+
+```bash
+python scripts/segment_doc.py path/to/doc.pdf [--json]
+```
+
+### 3–5 · Scoring, set-level, review
+
+9 LLM judges (C1–C9) + deterministic term-list rules from
+[incose/catalog.json](incose/catalog.json) (42 rules R1–R42 + 15 characteristics).
+Set-level (C10–C15) finds overlap candidates with the reranker, confirms with the
+LLM, then runs the set judge. Requirements scoring ≤ 3 on any characteristic go to
+the Reviewer. The INCOSE knowledge base lives in [incose/](incose/): `catalog.json`,
+`rules/*.md`, `characteristics/*.md`, `judges/*.md` (static judge prompts).
+
+Measured single-requirement latency (E4B, warm): deterministic ~3 ms · each judge
+~0.5 s · fast-lane headline (C3·C4·C5·C7) ~2 s · full 9 ~4.5 s · + review ~5.5 s.
+
+### 6 · Frontend
+
+**Apache ECharts 6.1.0** (vendored), light + dark, self-contained. The dashboard
+reads the producer's `scorecard_full.json`: on load `js/app.js` fetches
+`data/index.json` (the document picker) then the selected scorecard. Add a document:
 
 ```bash
 python scripts/produce_scorecard.py <doc.pdf> frontend/data/<name>.json
 python scripts/build_dashboard_index.py     # rescan data/*.json -> data/index.json
-# refresh the browser (nginx serves data/ with no-cache)
 ```
 
-### Self-contained build (for sharing / Artifact)
+`frontend/preview.html` is a single inlined build for sharing (opens on `file://`),
+rebuilt with `python scripts/build_preview.py`.
 
-`frontend/preview.html` is a single self-contained file with echarts, one
-scorecard, and app.js inlined — no server needed (opens on `file://`). It runs in
-single-document mode (picker hidden). Rebuild after frontend changes:
+---
 
-```bash
-python scripts/build_preview.py [data/<scorecard>.js]   # default data/scorecard.js
-```
+## Orchestration API (`reqoach`, `:7802`)
 
-The full **lifecycle app** (drag-drop ingest → streamed live progress → review
-workflow → document library) is specified in
-[specs/requirements_frontend.md](specs/requirements_frontend.md) §8 but not yet
-built — it needs an orchestration API (background jobs + SSE).
+The job body ([src/reqqa/jobs.py](src/reqqa/jobs.py)) runs the pipeline as an
+event-emitting generator — a `requirement` event fires the moment its 9 judges
+finish, so the monitor fills in live rather than waiting for the whole run. The
+service ([src/reqqa/orchestration_api.py](src/reqqa/orchestration_api.py)) wraps it:
 
-## Real-time single-requirement assessor
+| Endpoint | Purpose |
+|---|---|
+| `POST /documents` | upload → store → async job (returns `job_id`, `doc_id`) — *gated* |
+| `GET /jobs/{id}` · `/jobs/{id}/events` | job status / buffered event replay |
+| `GET /documents` | library listing |
+| `GET /documents/{id}/scorecard` | assembled scorecard JSON |
+| socket.io `join {job_id}` | live event stream (with replay for late joiners) |
+| socket.io `assess {text}` | live single-requirement assessment |
 
-An interactive editor that assesses **one** requirement as you type — distinct
-from `produce_scorecard.py`, which batches a whole document. There is no ingest or
-segmentation (you write the requirement) and no set-level scoring (that needs the
-whole set); it reuses the same deterministic rules, the 9 C1–C9 judge presets, and
-the reviewer.
+Produces the same scorecard shape as `produce_scorecard.py`, so the dashboard
+consumes both unchanged.
 
-Two tiers, matched to latency measured on the active model (**E4B**, warm):
+**Not yet built:** the review-workflow endpoints (accept/edit rewrites → versioned
+revisions, rescore) and a library UI with run comparison (spec §8.6 steps 5–6).
 
-| Tier | What runs | Latency |
-|------|-----------|---------|
-| **Instant** (per keystroke) | deterministic term/symbol rules | ~3 ms |
-| **Debounced** (on pause) | 9 C1–C9 judges, **fast-lane C3·C4·C5·C7 first**, then the reviewer | ~0.5 s/judge · ~2 s headline · ~4.5 s full · ~5.5 s + review |
-
-Results **stream** as each judge returns (the single GPU serializes them, so
-first-score-in-~0.5s beats waiting for a batch), and a new keystroke cancels the
-in-flight assessment. Transport is **socket.io**.
-
-> **Model note:** agent_server presets never select a model — they all run on the
-> single *active* chat model (E4B today). Faster judging can't come from a smaller
-> model per-preset; the only levers are streaming, the fast-lane subset, and
-> deferring the reviewer (see `agent_server/documents/how_to.md`).
-
-Core (`src/reqqa/assess.py`) is transport-agnostic: `assess_requirement()` (full,
-one shot), `iter_assessment()` (streamed events), `review_requirement()` (deferred
-reviewer). The server (`src/reqqa/realtime.py`) serves the editor page and streams
-over socket.io.
-
-```bash
-PYTHONPATH=src uvicorn reqqa.realtime:asgi --port 7801
-# open http://localhost:7801/
-```
-
-Requires `agent_server` (`:7701`) with the INCOSE presets registered (see above)
-and `llama-server` (`:8500`).
+---
 
 ## Repository layout
 
 ```
-src/reqqa/          ingest/ · segment/ · score/ · llm/ · api.py · assess.py · realtime.py
+src/reqqa/          ingest/ · segment/ · score/ · llm/ · api.py · assess.py
+                    jobs.py (streaming job core) · orchestration_api.py (the reqoach app)
 incose/             catalog.json · rules/ · characteristics/ · judges/
-scripts/            register_agents · register_incose_judges · segment_doc · produce_scorecard
-frontend/           index.html · js/app.js · editor.html · data/ · vendor/ (echarts, socket.io) · preview.html
+scripts/            register_agents · register_incose_judges · segment_doc
+                    produce_scorecard · build_dashboard_index · build_preview
+frontend/           index.html (dashboard) · ingest.html · monitor.html · editor.html
+                    js/app.js · data/ · vendor/ (echarts, socket.io) · preview.html
 specs/              technical_architecture.md · requirements_frontend.md
-compose.yaml        ingest service (GPU)
+compose.yaml        ingest (GPU) + reqoach (app) services
+Dockerfile          ingest image (Docling)
+Dockerfile.orchestration   reqoach image (slim, no Docling)
 ```
