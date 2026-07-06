@@ -12,8 +12,20 @@
   const CHARS = ["C1","C2","C3","C4","C5","C6","C7","C8","C9"];
   let D, names, health, byId;                 // current scorecard + derived
   let sortKey = 'overall', sortDir = 1, currentRows = [];
-  let drawerChart = null, openReq = null;
+  let drawerChart = null, drawerRuleChart = null, openReq = null, selReqId = null;
+  let RCATS = [];   // INCOSE rule categories present in the current document (radar axes)
   const charts = {};
+
+  // ---- INCOSE rule metadata (from GET /rules): id -> {name,category,detector,text,terms} ----
+  let RULES = {}, ruleBarIds = [];
+  const ruleName = id => (RULES[id] && RULES[id].name) || '';
+  const ruleCat  = id => (RULES[id] && RULES[id].category) || 'Other';
+  const ruleText = id => (RULES[id] && RULES[id].text) || '';
+  const uniq = a => [...new Set(a)];
+  const CAT_PALETTE = ['#2a78d6','#8a63d2','#0f9d8c','#d98324','#c0507a','#5a7a8c','#b0902a'];
+  const _catColor = {};
+  const catColor = cat => (_catColor[cat] ||
+    (_catColor[cat] = CAT_PALETTE[Object.keys(_catColor).length % CAT_PALETTE.length]));
 
   const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const T = () => ({ ink: cssVar('--ink'), ink2: cssVar('--ink2'), muted: cssVar('--muted'),
@@ -32,6 +44,18 @@
   const hEl = document.getElementById('health');
   const drawer = document.getElementById('drawer');
 
+  // The detail pane is an inline layout component (master–detail), not an overlay.
+  // Showing/hiding it reflows the content, so the charts must resize.
+  const resizeCharts = () => requestAnimationFrame(() => Object.values(charts).forEach(c => c.resize()));
+  function markSel() {
+    document.querySelectorAll('#reqrows tr.req').forEach(tr => {
+      const r = currentRows[+tr.dataset.i];
+      tr.classList.toggle('sel', !!r && r.req_id === selReqId);
+    });
+  }
+  const showDetail = () => { drawer.hidden = false; markSel(); resizeCharts(); };
+  const hideDetail = () => { drawer.hidden = true; selReqId = null; markSel(); resizeCharts(); };
+
   // ---- chart option builders (read current D / names / health / byId) ----
   function radarOpt() {
     const t = T(), m = D.aggregates.per_characteristic_mean, c0 = scoreColor(health);
@@ -47,14 +71,21 @@
           label: { show: true, color: t.ink2, fontSize: 10, formatter: p => (+p.value).toFixed(1) } }] }] };
   }
   function rulesOpt() {
-    const t = T(), e = Object.entries(D.aggregates.per_rule_violation_count).slice(0, 14).reverse();
-    return { backgroundColor: 'transparent', grid: { left: 46, right: 30, top: 6, bottom: 22 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'value', axisLabel: { color: t.muted }, splitLine: { lineStyle: { color: t.grid } } },
-      yAxis: { type: 'category', data: e.map(x => x[0]), axisLabel: { color: t.ink2 },
+    const t = T();
+    const e = Object.entries(D.aggregates.per_rule_violation_count).slice(0, 10).reverse();
+    ruleBarIds = e.map(x => x[0]);
+    const label = id => { const n = ruleName(id); return n ? `${id} ${n.length > 13 ? n.slice(0, 12) + '…' : n}` : id; };
+    return { backgroundColor: 'transparent', grid: { left: 104, right: 36, top: 6, bottom: 8 },
+      tooltip: { trigger: 'item', extraCssText: 'max-width:320px;white-space:normal',
+        formatter: p => { const id = ruleBarIds[p.dataIndex];
+          return `<b>${id} · ${esc(ruleName(id))}</b><br>${esc(ruleCat(id))} · ${p.value} requirement(s)`
+            + (ruleText(id) ? `<br><span style="opacity:.75">${esc(ruleText(id))}</span>` : '')
+            + `<br><span style="opacity:.6">click to inspect</span>`; } },
+      xAxis: { type: 'value', axisLabel: { show: false }, splitLine: { lineStyle: { color: t.grid } } },
+      yAxis: { type: 'category', data: e.map(x => label(x[0])), axisLabel: { color: t.ink2, fontSize: 11 },
         axisLine: { lineStyle: { color: t.axis } }, axisTick: { show: false } },
-      series: [{ type: 'bar', data: e.map(x => x[1]), barWidth: '62%',
-        itemStyle: { color: t.accent, borderRadius: [0, 4, 4, 0] },
+      series: [{ type: 'bar', barWidth: '62%', cursor: 'pointer',
+        data: e.map(x => ({ value: x[1], itemStyle: { color: catColor(ruleCat(x[0])), borderRadius: [0, 4, 4, 0] } })),
         label: { show: true, position: 'right', color: t.ink2 } }] };
   }
   function distOpt() {
@@ -71,9 +102,10 @@
   function setOpt() {
     const t = T(), a = D.set_level.set_assessment;
     return { backgroundColor: 'transparent', grid: { left: 40, right: 26, top: 6, bottom: 18 },
-      tooltip: { trigger: 'axis', formatter: p => {
-        const it = a.find(x => x.characteristic === p[0].name);
-        return `<b>${it.characteristic}</b> ${it.score}/5<br>${it.justification}`; } },
+      tooltip: { trigger: 'axis', confine: true, extraCssText: 'max-width:340px;white-space:normal;word-break:break-word',
+        formatter: p => {
+          const it = a.find(x => x.characteristic === p[0].name);
+          return `<b>${esc(it.characteristic)}</b> ${it.score}/5<br>${esc(it.justification || '')}`; } },
       xAxis: { type: 'value', max: 5, axisLabel: { color: t.muted }, splitLine: { lineStyle: { color: t.grid } } },
       yAxis: { type: 'category', data: a.map(x => x.characteristic), axisLabel: { color: t.ink2 },
         axisLine: { lineStyle: { color: t.axis } }, axisTick: { show: false } },
@@ -81,6 +113,48 @@
         data: a.map(x => ({ value: x.score, itemStyle: { color: scoreColor(x.score), borderRadius: [0,4,4,0] } })),
         label: { show: true, position: 'right', color: t.ink2, formatter: '{c}' } }] };
   }
+
+  // ---- Rules rolled up to INCOSE categories (3 chart options to compare) ----
+  function categoryRollup() {
+    const counts = {};
+    for (const [rid, n] of Object.entries(D.aggregates.per_rule_violation_count || {}))
+      counts[ruleCat(rid)] = (counts[ruleCat(rid)] || 0) + n;
+    return Object.entries(counts).map(([cat, count]) => ({ cat, count })).sort((a, b) => b.count - a.count);
+  }
+  function rcatRadarOpt() {                 // A · conformance (5 = clean; derived from violations)
+    const t = T(), d = categoryRollup(); if (!d.length) return { series: [] };
+    const max = Math.max(...d.map(x => x.count), 1);
+    const conf = d.map(x => +(5 * (1 - x.count / max)).toFixed(2));
+    return { backgroundColor: 'transparent',
+      tooltip: { trigger: 'item', extraCssText: 'max-width:260px;white-space:normal',
+        formatter: () => d.map(x => `${esc(x.cat)}: ${x.count}`).join('<br>') },
+      radar: { indicator: d.map(x => ({ name: x.cat, max: 5 })), radius: '60%',
+        axisName: { color: t.ink2, fontSize: 10 }, splitNumber: 5,
+        splitLine: { lineStyle: { color: t.grid } }, splitArea: { show: false }, axisLine: { lineStyle: { color: t.grid } } },
+      series: [{ type: 'radar', symbolSize: 3, data: [{ value: conf,
+        areaStyle: { color: t.accent, opacity: 0.18 }, lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent } }] }] };
+  }
+  function rcatDonutOpt() {                 // B · composition of violations by category
+    const t = T(), d = categoryRollup();
+    return { backgroundColor: 'transparent',
+      tooltip: { trigger: 'item', formatter: p => `${esc(p.name)}: ${p.value} (${p.percent}%)` },
+      series: [{ type: 'pie', radius: ['44%', '70%'], center: ['50%', '52%'],
+        itemStyle: { borderColor: cssVar('--surface'), borderWidth: 2 },
+        label: { color: t.ink2, fontSize: 10, formatter: '{b}' },
+        data: d.map(x => ({ name: x.cat, value: x.count, itemStyle: { color: catColor(x.cat) } })) }] };
+  }
+  function rcatBarOpt() {                   // C · magnitude per category
+    const t = T(), e = [...categoryRollup()].reverse();
+    return { backgroundColor: 'transparent', grid: { left: 96, right: 34, top: 6, bottom: 8 },
+      tooltip: { trigger: 'item' },
+      xAxis: { type: 'value', axisLabel: { show: false }, splitLine: { lineStyle: { color: t.grid } } },
+      yAxis: { type: 'category', data: e.map(x => x.cat), axisLabel: { color: t.ink2, fontSize: 10, width: 84, overflow: 'truncate' },
+        axisLine: { lineStyle: { color: t.axis } }, axisTick: { show: false } },
+      series: [{ type: 'bar', barWidth: '60%',
+        data: e.map(x => ({ value: x.count, itemStyle: { color: catColor(x.cat), borderRadius: [0, 4, 4, 0] } })),
+        label: { show: true, position: 'right', color: t.ink2 } }] };
+  }
+
   function reqRadarOpt(r) {
     const t = T(), c0 = scoreColor(r.overall);
     return { backgroundColor: 'transparent',
@@ -94,9 +168,33 @@
           areaStyle: { color: c0, opacity: 0.22 },
           label: { show: true, color: t.ink2, fontSize: 9, formatter: p => p.value } }] }] };
   }
+  // Per-requirement rules radar: conformance per INCOSE category (5 = no findings
+  // in that category, 0 = 3+). Same axes for every requirement (RCATS) so shapes
+  // are comparable, and pairs beside the characteristics radar.
+  const catAbbr = c => (c.split(' ')[0] || c).slice(0, 11);
+  function reqRuleRadarOpt(r) {
+    const t = T(); if (!RCATS.length) return { series: [] };
+    const per = {}, detIds = new Set((r.deterministic_findings || []).map(f => f.rule_id)), seen = new Set();
+    for (const f of (r.deterministic_findings || [])) per[ruleCat(f.rule_id)] = (per[ruleCat(f.rule_id)] || 0) + 1;
+    for (const c of CHARS) for (const id of (r.characteristics[c].rules_triggered || []))
+      if (!detIds.has(id) && !seen.has(id)) { seen.add(id); per[ruleCat(id)] = (per[ruleCat(id)] || 0) + 1; }
+    const conf = RCATS.map(cat => Math.max(0, 5 - 2 * (per[cat] || 0)));   // 5 = clean, integer for clean labels
+    return { backgroundColor: 'transparent',
+      tooltip: { trigger: 'item', extraCssText: 'max-width:240px;white-space:normal',
+        formatter: () => RCATS.map(cat => `${esc(cat)}: ${per[cat] || 0}`).join('<br>') },
+      radar: { indicator: RCATS.map(cat => ({ name: catAbbr(cat), max: 5 })), radius: '60%',
+        axisName: { color: t.ink2, fontSize: 9 }, splitNumber: 5,
+        splitLine: { lineStyle: { color: t.grid } }, splitArea: { show: false }, axisLine: { lineStyle: { color: t.grid } } },
+      series: [{ type: 'radar', symbolSize: 3, data: [{ value: conf,
+        areaStyle: { color: t.accent, opacity: 0.18 }, lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent },
+        label: { show: true, color: t.ink2, fontSize: 9, formatter: p => p.value } }] }] };
+  }
 
   const badge = s => s == null ? '<span class="muted">–</span>'
     : `<span class="badge" style="background:${scoreColor(s)}">${s}</span>`;
+  // Average/overall always shows 2 decimals (e.g. 5 -> "5.00") for column consistency.
+  const badgeAvg = s => s == null ? '<span class="muted">–</span>'
+    : `<span class="badge" style="background:${scoreColor(s)}">${(+s).toFixed(2)}</span>`;
 
   // ---- sortable requirements table ----
   const sortVal = (r, k) =>
@@ -110,10 +208,10 @@
       return va < vb ? -sortDir : va > vb ? sortDir : 0;
     });
     document.getElementById('reqrows').innerHTML = currentRows.map((r, i) => `
-      <tr class="req" data-i="${i}"><td>${r.req_id}</td>
-        <td>${esc(r.text.slice(0, 70))}${r.text.length > 70 ? '…' : ''}</td>
+      <tr class="req${r.req_id === selReqId ? ' sel' : ''}" data-i="${i}"><td>${r.req_id}</td>
+        <td><div class="rtxt" title="${esc(r.text)}">${esc(r.text)}</div></td>
         ${CHARS.map(c => `<td>${badge(r.characteristics[c].score)}</td>`).join('')}
-        <td>${badge(r.overall)}</td></tr>`).join('');
+        <td>${badgeAvg(r.overall)}</td></tr>`).join('');
     document.querySelectorAll('th[data-key]').forEach(th => {
       const on = th.dataset.key === sortKey;
       th.classList.toggle('sorted', on);
@@ -121,32 +219,170 @@
     });
   }
 
-  // ---- detail drawer (with per-requirement radar) ----
+  // ---- detail drawer: requirement text on top, C and R as peer columns ----
+  const provStr = r => `${(r.provenance && r.provenance.section_path) || ''}${r.provenance && r.provenance.page ? ' · p.' + r.provenance.page : ''}`;
+
+  // Requirement text with the deterministic rules' offending spans highlighted.
+  // Offsets index the RAW text, so we highlight raw (not fmtText) to stay aligned.
+  function highlightText(r) {
+    const text = r.text || '';
+    const marks = [];
+    for (const f of (r.deterministic_findings || []))
+      for (const m of (f.matches || []))
+        if (typeof m.offset === 'number' && m.term) marks.push({ s: m.offset, e: m.offset + m.term.length, rule: f.rule_id });
+    if (!marks.length) return esc(text);
+    const n = text.length, cover = new Array(n).fill(null);
+    for (const mk of marks) for (let i = Math.max(0, mk.s); i < Math.min(n, mk.e); i++) (cover[i] || (cover[i] = new Set())).add(mk.rule);
+    const key = i => cover[i] ? [...cover[i]].sort().join(',') : '';
+    let out = '', i = 0;
+    while (i < n) {
+      if (!cover[i]) { let j = i; while (j < n && !cover[j]) j++; out += esc(text.slice(i, j)); i = j; }
+      else { const k = key(i); let j = i; while (j < n && cover[j] && key(j) === k) j++;
+        const tip = k.split(',').map(x => `${x} ${ruleName(x)}`.trim()).join(' · ');
+        out += `<span class="hl" data-rules="${k}" title="${esc(tip)}">${esc(text.slice(i, j))}</span>`; i = j; }
+    }
+    return out;
+  }
+
+  const cCard = (r, c) => { const a = r.characteristics[c]; return `
+    <div class="cchar"><div class="top">${badge(a.score)}<span class="name">${names[c]} (${c})</span></div>
+      ${a.evidence ? `<div class="ev">“${esc(a.evidence)}”</div>` : ''}
+      <div class="just">${esc(a.justification || '')}</div></div>`; };
+
+  // R column: deterministic findings (exact, with term chips) + judge-flagged rules
+  // (opinion), grouped by INCOSE category.
+  function rColumn(r) {
+    const dets = r.deterministic_findings || [];
+    const detIds = new Set(dets.map(f => f.rule_id));
+    const llm = [];
+    for (const c of CHARS) for (const id of (r.characteristics[c].rules_triggered || []))
+      if (!detIds.has(id) && !llm.includes(id)) llm.push(id);
+    const items = dets.map(f => ({ rule: f.rule_id, det: true, terms: uniq((f.matches || []).map(m => m.term)) }))
+      .concat(llm.map(id => ({ rule: id, det: false, terms: [] })));
+    if (!items.length) return '<div class="rnone">No rule violations flagged for this requirement.</div>';
+    const byCat = {};
+    for (const it of items) (byCat[ruleCat(it.rule)] || (byCat[ruleCat(it.rule)] = [])).push(it);
+    return Object.entries(byCat).map(([cat, its]) => `
+      <div class="rcat" style="color:${catColor(cat)}">${esc(cat)}</div>
+      ${its.map(it => `
+        <div class="rfind ${it.det ? 'det' : 'llm'} rclick" data-rule="${it.rule}">
+          <div class="rtop"><span class="rid">${it.rule}</span><span class="rnm">${esc(ruleName(it.rule))}</span>
+            <span class="src">${it.det ? 'deterministic' : 'judge-flagged'}</span></div>
+          ${ruleText(it.rule) ? `<div class="guide">${esc(ruleText(it.rule))}</div>` : ''}
+          ${it.terms.length ? `<div class="terms">${it.terms.map(t => `<span class="term">${esc(t)}</span>`).join('')}</div>` : ''}
+        </div>`).join('')}`).join('');
+  }
+
+  const rSummary = r => {
+    const cats = {}, detIds = new Set((r.deterministic_findings || []).map(f => f.rule_id)), seen = new Set();
+    for (const f of (r.deterministic_findings || [])) cats[ruleCat(f.rule_id)] = (cats[ruleCat(f.rule_id)] || 0) + 1;
+    for (const c of CHARS) for (const id of (r.characteristics[c].rules_triggered || []))
+      if (!detIds.has(id) && !seen.has(id)) { seen.add(id); cats[ruleCat(id)] = (cats[ruleCat(id)] || 0) + 1; }
+    const parts = Object.entries(cats).map(([k, v]) => `${v} ${k}`);
+    return parts.length ? parts.join(' · ') : 'none';
+  };
+
+  const reviewBlock = r => !r.review ? '' : `
+    <h3 style="margin-top:16px">Suggested improvements</h3>
+    ${(r.review.rewrites || []).map(w => `<div class="cchar"><b>rewrite</b> → ${esc(w.text)}<div class="muted" style="font-size:12px">${esc(w.notes || '')}</div></div>`).join('')}
+    ${(r.review.advisories || []).map(x => `<div class="cchar"><b>${esc(x.characteristic)} advisory</b>: ${esc(x.issue)}<div class="just">${esc(x.suggestion)}</div></div>`).join('')}`;
+
   function openDrawer(r) {
     openReq = r;
     document.getElementById('drawerBody').innerHTML = `
-      <h3>${r.req_id} <span class="badge" style="background:${scoreColor(r.overall)}">${r.overall}</span></h3>
-      <div class="muted" style="font-size:12px">${(r.provenance && r.provenance.section_path) || ''}${r.provenance && r.provenance.page ? ' · p.' + r.provenance.page : ''}</div>
-      <div id="reqRadar" style="height:236px;margin:6px 0 2px"></div>
-      <div class="rtext">${fmtText(r.text)}</div>
-      ${CHARS.map(c => { const a = r.characteristics[c]; return `
-        <div class="cchar"><div class="top">
-          ${badge(a.score)}<span class="name">${names[c]} (${c})</span>
-          <span class="rules">${(a.rules || a.rules_triggered || []).join(', ')}</span></div>
-          ${a.evidence ? `<div class="ev">“${a.evidence}”</div>` : ''}
-          <div class="just">${a.justification || ''}</div></div>`; }).join('')}
-      ${r.review ? `<h3 style="margin-top:14px">Suggested improvements</h3>
-        ${(r.review.rewrites || []).map(w => `<div class="cchar"><b>rewrite</b> → ${w.text}<div class="muted" style="font-size:12px">${w.notes || ''}</div></div>`).join('')}
-        ${(r.review.advisories || []).map(x => `<div class="cchar"><b>${x.characteristic} advisory</b>: ${x.issue}<div class="just">${x.suggestion}</div></div>`).join('')}` : ''}`;
+      <div class="detail-head">
+        <h3 style="display:flex;align-items:center;gap:10px">${r.req_id}<span class="badge" style="background:${scoreColor(r.overall)};margin-left:auto">${(+r.overall).toFixed(2)}</span></h3>
+        <div class="muted" style="font-size:12px">${esc(provStr(r))}</div>
+        <div class="rtext" id="rtext">${highlightText(r)}</div>
+        <div class="dcharts">
+          <div class="col"><h4>Characteristics</h4><div id="reqRadar" style="height:200px;margin:2px 0"></div></div>
+          <div class="col"><h4>Rules</h4><div id="reqRuleRadar" style="height:200px;margin:2px 0"></div></div>
+        </div>
+      </div>
+      <div class="detail-scroll">
+        <div class="col">${CHARS.map(c => cCard(r, c)).join('')}</div>
+        <div class="col">${rColumn(r)}</div>
+      </div>`;
+    renderSugg(r);                       // suggestions now live in their own right-hand column
+    selReqId = r.req_id;
+    drawer.hidden = false;              // must be visible BEFORE echarts measures the radars
+    markSel();
     if (drawerChart) drawerChart.dispose();
     drawerChart = echarts.init(document.getElementById('reqRadar'));
     drawerChart.setOption(reqRadarOpt(r));
-    drawer.classList.add('open');
+    if (drawerRuleChart) drawerRuleChart.dispose();
+    drawerRuleChart = echarts.init(document.getElementById('reqRuleRadar'));
+    drawerRuleChart.setOption(reqRuleRadarOpt(r));
+    wireRuleLinkage();
+  }
+
+  // Suggested improvements for the selected requirement — its own right-hand panel.
+  function renderSugg(r) {
+    const el = document.getElementById('suggBody');
+    const rev = r && r.review;
+    let h = '<h4 class="suggh">Suggested improvements</h4>';
+    const rw = (rev && rev.rewrites) || [], adv = (rev && rev.advisories) || [];
+    if (!rw.length && !adv.length) {
+      h += '<div class="rnone">' + (r ? 'No suggestions — this requirement scored well.'
+                                       : 'Select a requirement to see suggestions.') + '</div>';
+    } else {
+      h += rw.map(w => `<div class="cchar"><b>rewrite</b> → ${esc(w.text)}<div class="muted" style="font-size:12px">${esc(w.notes || '')}</div></div>`).join('');
+      h += adv.map(x => `<div class="cchar"><b>${esc(x.characteristic)} advisory</b>: ${esc(x.issue)}<div class="just">${esc(x.suggestion)}</div></div>`).join('');
+    }
+    el.innerHTML = h;
+  }
+
+  // hover a rule finding <-> its highlighted span(s); click a finding -> rule panel
+  function wireRuleLinkage() {
+    const body = document.getElementById('drawerBody');
+    const set = (rid, on) => {
+      body.querySelectorAll('.hl').forEach(h => { if (h.dataset.rules.split(',').includes(rid)) h.classList.toggle('active', on); });
+      body.querySelectorAll(`.rfind[data-rule="${rid}"]`).forEach(f => f.classList.toggle('active', on));
+    };
+    body.querySelectorAll('.rfind[data-rule]').forEach(el => {
+      const rid = el.dataset.rule;
+      el.addEventListener('mouseenter', () => set(rid, true));
+      el.addEventListener('mouseleave', () => set(rid, false));
+      el.addEventListener('click', () => openRulePanel(rid));
+    });
+    body.querySelectorAll('.hl[data-rules]').forEach(el => {
+      const rids = el.dataset.rules.split(',');
+      el.addEventListener('mouseenter', () => rids.forEach(r => set(r, true)));
+      el.addEventListener('mouseleave', () => rids.forEach(r => set(r, false)));
+    });
+  }
+
+  // ---- rule-centric panel: a rule's guidance + every requirement that triggers it ----
+  function openRulePanel(ruleId) {
+    if (drawerChart) { drawerChart.dispose(); drawerChart = null; }
+    if (drawerRuleChart) { drawerRuleChart.dispose(); drawerRuleChart = null; }
+    openReq = null;
+    const m = RULES[ruleId] || {};
+    const detTerms = r => uniq((r.deterministic_findings || []).filter(f => f.rule_id === ruleId).flatMap(f => (f.matches || []).map(x => x.term)));
+    const hits = D.requirements.filter(r => (r.deterministic_findings || []).some(f => f.rule_id === ruleId)
+      || CHARS.some(c => (r.characteristics[c].rules_triggered || []).includes(ruleId)));
+    document.getElementById('drawerBody').innerHTML = `
+      <h3>${ruleId} · ${esc(m.name || '')}</h3>
+      <div class="muted" style="font-size:12px">${esc(m.category || 'Other')}${m.detector ? ' · ' + esc(m.detector) : ''} · ${hits.length} requirement${hits.length !== 1 ? 's' : ''}</div>
+      ${m.text ? `<div class="rtext">${esc(m.text)}</div>` : ''}
+      ${(m.terms && m.terms.length) ? `<div class="terms" style="margin:8px 0 4px">${m.terms.slice(0, 40).map(t => `<span class="term">${esc(t)}</span>`).join('')}${m.terms.length > 40 ? ' <span class="muted">…</span>' : ''}</div>` : ''}
+      <h4 style="margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Requirements (${hits.length})</h4>
+      ${hits.map(r => { const ts = detTerms(r); return `
+        <div class="cchar rclick" data-req="${esc(r.req_id)}"><div class="top">
+          <span class="rid">${esc(r.req_id)}</span>${badgeAvg(r.overall)}</div>
+          <div class="just">${esc(r.text.slice(0, 130))}${r.text.length > 130 ? '…' : ''}</div>
+          ${ts.length ? `<div class="terms">${ts.map(t => `<span class="term">${esc(t)}</span>`).join('')}</div>` : ''}</div>`; }).join('')}`;
+    document.querySelectorAll('#drawerBody .rclick[data-req]').forEach(el =>
+      el.addEventListener('click', () => { const r = D.requirements.find(x => x.req_id === el.dataset.req); if (r) openDrawer(r); }));
+    selReqId = null;
+    renderSugg(null);
+    showDetail();
   }
 
   // ---- overlaps side panel ----
   function openOverlaps() {
     if (drawerChart) { drawerChart.dispose(); drawerChart = null; }
+    if (drawerRuleChart) { drawerRuleChart.dispose(); drawerRuleChart = null; }
     openReq = null;
     const ov = D.set_level.overlaps || [];
     document.getElementById('drawerBody').innerHTML = `
@@ -157,7 +393,9 @@
           <span class="name">${o.a_id} ~ ${o.b_id}</span><span class="sc">${o.score}</span></div>
           <div class="just">${a ? esc(a.text.slice(0, 96)) : o.a_id}</div>
           <div class="just">${b ? esc(b.text.slice(0, 96)) : o.b_id}</div></div>`; }).join('')}`;
-    drawer.classList.add('open');
+    selReqId = null;
+    renderSugg(null);
+    showDetail();
   }
 
   function renderAll() {
@@ -165,7 +403,11 @@
     charts.rules.setOption(rulesOpt(), true);
     charts.dist.setOption(distOpt(), true);
     charts.setlevel.setOption(setOpt(), true);
+    charts.rcat_radar.setOption(rcatRadarOpt(), true);
+    charts.rcat_donut.setOption(rcatDonutOpt(), true);
+    charts.rcat_bar.setOption(rcatBarOpt(), true);
     if (openReq && drawerChart) drawerChart.setOption(reqRadarOpt(openReq), true);
+    if (openReq && drawerRuleChart) drawerRuleChart.setOption(reqRuleRadarOpt(openReq), true);
   }
 
   // ---- load a scorecard (producer format) and (re)render everything ----
@@ -179,14 +421,20 @@
     byId = Object.fromEntries(D.requirements.map(r => [r.req_id, r]));
     hEl.textContent = health.toFixed(2); hEl.style.color = scoreColor(health);
     document.getElementById('ovcount').textContent = (D.set_level.overlaps || []).length;
-    drawer.classList.remove('open'); openReq = null;
+    RCATS = categoryRollup().map(x => x.cat);   // fixed radar axes for per-req rules radar
+    openReq = null;
     renderAll();
     renderTable();
+    // The detail pane is always visible; pre-select the first requirement so it's never empty.
+    if (currentRows.length) openDrawer(currentRows[0]);
   }
 
   // ---- one-time wiring (independent of which document is loaded) ----
-  ['radar','rules','dist','setlevel'].forEach(id =>
+  ['radar','rules','dist','setlevel','rcat_radar','rcat_donut','rcat_bar'].forEach(id =>
     charts[id] = echarts.init(document.getElementById(id), null, { renderer: 'canvas' }));
+
+  // click a rule bar -> its rule-centric panel (guidance + affected requirements)
+  charts.rules.on('click', p => { const id = ruleBarIds[p.dataIndex]; if (id) openRulePanel(id); });
 
   document.querySelectorAll('th[data-key]').forEach(th =>
     th.addEventListener('click', () => {
@@ -198,17 +446,37 @@
     const tr = e.target.closest('tr.req'); if (!tr) return;
     openDrawer(currentRows[+tr.dataset.i]);
   });
+  // Arrow keys move the selection up/down the requirements list and auto-open it
+  // in the detail panels (ignored while a form control has focus, e.g. the picker).
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (!currentRows.length) return;
+    e.preventDefault();
+    let i = currentRows.findIndex(r => r.req_id === selReqId);
+    i = i < 0 ? 0 : i + (e.key === 'ArrowDown' ? 1 : -1);
+    i = Math.max(0, Math.min(currentRows.length - 1, i));
+    openDrawer(currentRows[i]);
+    const tr = document.querySelector(`#reqrows tr[data-i="${i}"]`);
+    if (tr) tr.scrollIntoView({ block: 'nearest' });
+  });
   document.getElementById('ovBtn').addEventListener('click', openOverlaps);
-  document.getElementById('drawerClose').onclick = () => drawer.classList.remove('open');
-  document.getElementById('themeBtn').onclick = () => {
-    const h = document.documentElement;
-    h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark';
+  // Collapse/expand the chart row to give the bottom panels more height.
+  document.getElementById('chartsToggle').onclick = e => {
+    const collapsed = document.body.classList.toggle('charts-collapsed');
+    e.currentTarget.textContent = collapsed ? '▸' : '▾';
+    resizeCharts();
+  };
+  // The shared top nav (js/nav.js) owns the theme toggle; re-render on its event.
+  window.addEventListener('reqoach:theme', () => {
     hEl.style.color = scoreColor(health);
     renderAll();
-  };
+  });
   window.addEventListener('resize', () => {
     Object.values(charts).forEach(c => c.resize());
     if (drawerChart) drawerChart.resize();
+    if (drawerRuleChart) drawerRuleChart.resize();
   });
 
   // ---- document picker (the subtitle select) ----
@@ -226,10 +494,13 @@
   }
   const showOnly = txt => { sel.innerHTML = `<option>${esc(txt)}</option>`; fitDocSel(); };
 
+  // Rule metadata (names, categories, guidance) for the R findings + chart.
+  // Best-effort: a static-only deploy without the API just falls back to bare ids.
+  const rulesP = fetch('rules').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+
   // ---- boot: pick data mode ----
   if (window.SCORECARD) {                      // single-document inlined build
-    showOnly(window.SCORECARD.source_file);
-    loadScorecard(window.SCORECARD);
+    rulesP.then(m => { RULES = m || {}; showOnly(window.SCORECARD.source_file); loadScorecard(window.SCORECARD); });
   } else {                                     // multi-document mode
     // The picker merges two sources: curated static scorecards under data/, and
     // documents assessed live through the orchestration API (GET documents ->
@@ -253,7 +524,8 @@
       .then(r => r.ok ? r.json() : { documents: [] })
       .then(d => (d && d.documents) || []).catch(() => []);
 
-    Promise.all([staticP, apiP]).then(([statics, apis]) => {
+    Promise.all([staticP, apiP, rulesP]).then(([statics, apis, rmeta]) => {
+      RULES = rmeta || {};
       const opts = statics.map(d => ({ value: 'static:' + d.file, name: d.name }));
       for (const d of apis) {
         if (!d.total) continue;                // skip empty/failed jobs

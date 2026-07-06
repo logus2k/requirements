@@ -1,14 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>reqoach · assess a document</title>
 <style>
-  :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232d;--line:#2b333d;--fg:#e6edf3;
-    --mut:#8b949e;--acc:#58a6ff;--ok:#3fb950;--err:#f85149;}
-  @media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--panel:#fff;--panel2:#f0f3f6;
-    --line:#d0d7de;--fg:#1f2328;--mut:#636c76;--acc:#0969da;}}
+  /* Shared palette with the dashboard + data-theme light/dark (default light). */
+  :root{--bg:#f9f9f7;--panel:#fcfcfb;--panel2:#f1f1ee;--line:#e1e0d9;--fg:#0b0b0b;
+    --mut:#898781;--acc:#2a78d6;--ok:#0ca30c;--err:#d03b3b;}
+  html[data-theme="dark"]{--bg:#0d0d0d;--panel:#1a1a19;--panel2:#242422;--line:#2c2c2a;
+    --fg:#fff;--mut:#898781;--acc:#3987e5;--ok:#6bbf59;--err:#d03b3b;}
   *{box-sizing:border-box}
   body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
   header{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
@@ -32,11 +33,12 @@
   @keyframes sp{to{transform:rotate(360deg)}}
   input[type=file]{display:none}
 </style>
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<link rel="stylesheet" href="css/nav.css">
 </head>
 <body>
 <header>
-  <h1>reqoach</h1><span class="sub">assess a requirements document</span>
-  <nav><a href="index.html">Dashboard</a><a href="editor.html">Live editor</a></nav>
+  <h1>Assess a document</h1><span class="sub">upload a requirements document to assess it</span>
 </header>
 <main>
   <div id="drop">
@@ -80,5 +82,6 @@ async function upload(file){
   }catch(e){ setMsg(`Network error: ${e.message}`,"err"); }
 }
 </script>
+<script src="js/nav.js"></script>
 </body>
 </html>

@@ -149,6 +149,27 @@ def health() -> dict:
     return {"status": "ok", "store": STORE, "jobs": len(jm.jobs)}
 
 
+_RULES_META: dict | None = None
+
+
+@api.get("/rules")
+def rules_meta() -> dict:
+    """INCOSE rule metadata for the frontend: id -> {name, category, detector,
+    text (guidance), terms}. Lets the UI show rule names/guidance instead of bare
+    ids, group by category, and label deterministic vs judge-flagged findings.
+    Cached after first read; the catalog is static."""
+    global _RULES_META
+    if _RULES_META is None:
+        path = os.path.join(_REPO, "incose", "catalog.json")
+        with open(path, encoding="utf-8") as f:
+            cat = json.load(f)
+        _RULES_META = {r["id"]: {"name": r.get("name"), "category": r.get("category"),
+                                 "detector": r.get("detector"), "scope": r.get("scope"),
+                                 "text": r.get("text"), "terms": r.get("terms", [])}
+                       for r in cat.get("rules", [])}
+    return _RULES_META
+
+
 @api.post("/documents")
 async def upload_document(file: UploadFile = File(...),
                           review: bool = True, set_level: bool = True) -> JSONResponse:

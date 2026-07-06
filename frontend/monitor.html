@@ -1,14 +1,16 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>reqoach · live assessment monitor</title>
 <style>
-  :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232d;--line:#2b333d;--fg:#e6edf3;
-    --mut:#8b949e;--acc:#58a6ff;--s1:#f85149;--s2:#f0883e;--s3:#d29922;--s4:#3fb950;--s5:#2ea043;}
-  @media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--panel:#fff;--panel2:#f0f3f6;
-    --line:#d0d7de;--fg:#1f2328;--mut:#636c76;--acc:#0969da;}}
+  /* Shared palette with the dashboard: same assessment colors (--s1..--s5) and
+     the same data-theme light/dark system (default light). */
+  :root{--bg:#f9f9f7;--panel:#fcfcfb;--panel2:#f1f1ee;--line:#e1e0d9;--fg:#0b0b0b;
+    --mut:#898781;--acc:#2a78d6;--s1:#d03b3b;--s2:#ec835a;--s3:#fab219;--s4:#6bbf59;--s5:#0ca30c;}
+  html[data-theme="dark"]{--bg:#0d0d0d;--panel:#1a1a19;--panel2:#242422;--line:#2c2c2a;
+    --fg:#fff;--mut:#898781;--acc:#3987e5;}
   *{box-sizing:border-box}
   body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
   header{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
@@ -48,6 +50,8 @@
   a{color:var(--acc)}
   .muted{color:var(--mut)}
 </style>
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<link rel="stylesheet" href="css/nav.css">
 </head>
 <body>
 <header>
@@ -91,8 +95,9 @@ const CNAME={C1:"Necessary",C2:"Appropriate",C3:"Unambiguous",C4:"Complete",C5:"
   C6:"Feasible",C7:"Verifiable",C8:"Correct",C9:"Conforming"};
 const STAGES=["ingest","segment","gate","score","review","set_level"];
 const $=id=>document.getElementById(id);
-const dark=matchMedia("(prefers-color-scheme:dark)").matches;
-const AX=dark?"#8b949e":"#636c76", LINE=dark?"#2b333d":"#d0d7de";
+// Chart colors read live from the theme's CSS vars, so a theme switch re-themes
+// the charts on the next recompute() (see window.reqoachRedraw).
+const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 // ---- stage strip ----
 const stageEl={};
@@ -118,20 +123,23 @@ const records=[];
 const radar=echarts.init($("radar")), dist=echarts.init($("dist")), rules=echarts.init($("rules"));
 addEventListener("resize",()=>{radar.resize();dist.resize();rules.resize();});
 
-function scoreColor(s){return["#6e7681","#f85149","#f0883e","#d29922","#3fb950","#2ea043"][s]||"#6e7681";}
+function scoreColor(s){return cssVar("--s"+Math.max(1,Math.min(5,Math.round(s))))||cssVar("--mut");}
+window.reqoachRedraw=()=>{ recompute(); radar.resize();dist.resize();rules.resize(); };
 
 function recompute(){
+  const AX=cssVar("--mut"), LINE=cssVar("--line"), ACC=cssVar("--acc");
   // per-characteristic running mean
   const means=CHARS.map(c=>{
     const v=records.map(r=>r.characteristics[c]&&r.characteristics[c].score).filter(x=>x);
     return v.length?+(v.reduce((a,b)=>a+b,0)/v.length).toFixed(2):0;
   });
+  const scored=means.filter(x=>x); const rc0=scoreColor(scored.length?scored.reduce((a,b)=>a+b,0)/scored.length:3);
   radar.setOption({
     radar:{indicator:CHARS.map((c,i)=>({name:c,max:5})),radius:"62%",
       axisName:{color:AX,fontSize:11},splitLine:{lineStyle:{color:LINE}},
       splitArea:{show:false},axisLine:{lineStyle:{color:LINE}}},
-    series:[{type:"radar",data:[{value:means,areaStyle:{color:"rgba(63,185,80,.25)"},
-      lineStyle:{color:"#3fb950"},itemStyle:{color:"#3fb950"}}]}]
+    series:[{type:"radar",data:[{value:means,areaStyle:{color:rc0,opacity:.18},
+      lineStyle:{color:rc0},itemStyle:{color:rc0}}]}]
   });
   $("ncount").textContent=records.length;
   // distribution by rounded overall
@@ -156,7 +164,7 @@ function recompute(){
     grid:{left:44,right:20,top:6,bottom:22},
     xAxis:{type:"value",axisLabel:{color:AX},splitLine:{lineStyle:{color:LINE}}},
     yAxis:{type:"category",data:top.map(x=>x[0]),axisLabel:{color:AX},axisLine:{lineStyle:{color:LINE}}},
-    series:[{type:"bar",data:top.map(x=>x[1]),itemStyle:{color:"#58a6ff"}}]
+    series:[{type:"bar",data:top.map(x=>x[1]),itemStyle:{color:ACC}}]
   });
 }
 
@@ -195,5 +203,6 @@ socket.on("job_done",e=>{dot.className="on";stxt.textContent="done";
 socket.on("job_error",e=>{dot.className="";stxt.textContent="error";
   $("banner").innerHTML=`<span style="color:var(--s1)">Job error: ${e.message||"unknown"}</span>`;});
 </script>
+<script src="js/nav.js"></script>
 </body>
 </html>

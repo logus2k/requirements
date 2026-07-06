@@ -1,146 +1,271 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>reqqa · live requirement assessor</title>
+<title>reqoach · live requirement assessor</title>
 <style>
+  /* Shared palette with the dashboard: same assessment colors (--s1..--s5) and
+     the same data-theme light/dark system (default light). */
   :root{
-    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2b333d;
-    --fg:#e6edf3; --mut:#8b949e; --acc:#58a6ff;
-    --s1:#f85149; --s2:#f0883e; --s3:#d29922; --s4:#3fb950; --s5:#2ea043;
+    --bg:#f9f9f7; --panel:#fcfcfb; --panel2:#f1f1ee; --line:#e1e0d9;
+    --fg:#0b0b0b; --mut:#898781; --acc:#2a78d6;
+    --s1:#d03b3b; --s2:#ec835a; --s3:#fab219; --s4:#6bbf59; --s5:#0ca30c;
   }
-  @media (prefers-color-scheme:light){
-    :root{--bg:#f6f8fa;--panel:#fff;--panel2:#f0f3f6;--line:#d0d7de;
-      --fg:#1f2328;--mut:#636c76;--acc:#0969da;}
+  html[data-theme="dark"]{
+    --bg:#0d0d0d; --panel:#1a1a19; --panel2:#242422; --line:#2c2c2a;
+    --fg:#fff; --mut:#898781; --acc:#3987e5;
   }
   *{box-sizing:border-box}
-  body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;
-    background:var(--bg);color:var(--fg)}
+  body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
   header{display:flex;align-items:center;gap:12px;padding:14px 22px;
     border-bottom:1px solid var(--line);background:var(--panel)}
   header h1{font-size:16px;margin:0;font-weight:600}
   header .sub{color:var(--mut);font-size:13px}
-  #status{margin-left:auto;font-size:12px;color:var(--mut);display:flex;
-    align-items:center;gap:6px}
+  #status{margin-left:auto;font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px}
   #dot{width:9px;height:9px;border-radius:50%;background:#6e7681}
-  #dot.on{background:var(--s4)} #dot.busy{background:var(--s3);
-    animation:pulse 1s infinite} @keyframes pulse{50%{opacity:.3}}
-  main{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:22px;
-    max-width:1200px;margin:0 auto}
-  @media (max-width:820px){main{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-    padding:16px}
-  label.lbl{font-size:12px;text-transform:uppercase;letter-spacing:.05em;
-    color:var(--mut);font-weight:600}
-  textarea{width:100%;min-height:120px;margin-top:8px;padding:12px;
-    background:var(--panel2);color:var(--fg);border:1px solid var(--line);
-    border-radius:8px;font:15px/1.5 inherit;resize:vertical}
-  textarea:focus{outline:2px solid var(--acc);border-color:var(--acc)}
-  .findings{margin-top:14px;display:flex;flex-wrap:wrap;gap:6px}
-  .chip{font-size:12px;padding:3px 9px;border-radius:20px;
-    background:var(--panel2);border:1px solid var(--line);color:var(--mut)}
-  .chip b{color:var(--fg)}
-  .overall{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
-  .overall .num{font-size:34px;font-weight:700}
-  .overall .of{color:var(--mut);font-size:14px}
-  .bars{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
-  .b{display:flex;align-items:center;gap:8px;font-size:13px;padding:7px 9px;
-    border-radius:7px;background:var(--panel2);border:1px solid var(--line);
-    opacity:.4;transition:opacity .2s}
+  #dot.on{background:var(--s4)} #dot.busy{background:var(--s3);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.3}}
+  main{max-width:1440px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  label.lbl{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-weight:600}
+  .reqhead{display:flex;align-items:center;gap:8px}
+  .qhint{width:16px;height:16px;border-radius:50%;border:1px solid var(--line);color:var(--mut);
+    font-size:11px;font-weight:700;display:inline-grid;place-items:center;cursor:help}
+  .reqscore{margin-left:auto;min-width:56px;text-align:center;border-radius:8px;padding:3px 10px;
+    font-weight:700;font-size:18px;color:#fff;background:#6e7681;font-variant-numeric:tabular-nums}
+  .chart{width:100%;height:196px}
+  /* requirement field with an inline highlight overlay behind the textarea */
+  .reqwrap{position:relative;margin-top:8px}
+  .reqfield{width:100%;min-height:110px;padding:12px;border:1px solid var(--line);border-radius:8px;
+    font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.7;
+    letter-spacing:normal;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word}
+  .backdrop{position:absolute;inset:0;color:transparent;pointer-events:none;overflow:auto;
+    background:var(--panel2);z-index:0}
+  .backdrop .hl{background:rgba(208,59,59,.15);border-bottom:2px solid var(--s1);border-radius:2px}
+  .backdrop .hl.active{background:rgba(208,59,59,.34)}
+  textarea#req{position:relative;z-index:1;background:transparent;color:var(--fg);resize:vertical;display:block}
+  textarea#req:focus{outline:2px solid var(--acc);border-color:var(--acc)}
+  .tip{color:var(--mut);font-size:12px;margin-top:8px}
+  .tip b{color:var(--fg)}
+  /* two peer columns: C left, R right */
+  .cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;align-items:start}
+  @media (max-width:1080px){.cols{grid-template-columns:1fr}}
+  .colhead{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .colhead h4{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
+  .colhead h4 span{color:var(--mut);opacity:.7}
+  .colhead .r{margin-left:auto;font-size:12px;color:var(--mut)}
+  .overall .num{font-size:22px;font-weight:700} .overall .of{color:var(--mut);font-size:12px}
+  /* C tiles */
+  .bars{display:grid;grid-template-columns:1fr;gap:8px}
+  .b{display:flex;align-items:center;gap:8px;font-size:13px;padding:7px 9px;border-radius:7px;
+    background:var(--panel2);border:1px solid var(--line);opacity:.4;transition:opacity .2s}
   .b.filled{opacity:1}
   .b .sc{width:22px;height:22px;border-radius:5px;display:grid;place-items:center;
     color:#fff;font-weight:700;font-size:12px;flex:none;background:#6e7681}
   .b .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .b.fast{box-shadow:inset 3px 0 0 var(--acc)}
-  .s1{background:var(--s1)}.s2{background:var(--s2)}.s3{background:var(--s3)}
-  .s4{background:var(--s4)}.s5{background:var(--s5)}
-  .review{margin-top:14px}
-  .rw{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
-    padding:11px 13px;margin-top:8px}
-  .rw .txt{font-weight:500} .rw .meta{color:var(--mut);font-size:12px;margin-top:4px}
-  .adv{color:var(--s3)}
+  .b .sc.s1{background:var(--s1)}.b .sc.s2{background:var(--s2)}.b .sc.s3{background:var(--s3)}
+  .b .sc.s4{background:var(--s4)}.b .sc.s5{background:var(--s5)}
+  /* R findings (mirror the dashboard drawer) */
+  .rcat{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:12px 0 2px;font-weight:600}
+  .rcat:first-child{margin-top:0}
+  .rfind{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;transition:box-shadow .12s}
+  .rfind.det{border-left:3px solid var(--acc)}
+  .rfind.llm{border-left:3px dashed var(--mut)}
+  .rfind.active{box-shadow:0 0 0 2px var(--acc)}
+  .rfind .rtop{display:flex;align-items:baseline;gap:8px}
+  .rfind .rid{font-weight:600}.rfind .rnm{color:var(--fg);opacity:.8}
+  .rfind .src{margin-left:auto;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
+  .rfind .guide{color:var(--fg);opacity:.72;font-size:12px;margin-top:3px}
+  .rfind .terms{margin-top:6px;display:flex;flex-wrap:wrap;gap:5px}
+  .term{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 7px;
+    font-size:12px;color:var(--s1);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .rnone{color:var(--mut);font-size:12.5px;padding:6px 2px}
+  /* review */
+  .review .rw{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-top:8px}
+  .rw .txt{font-weight:500}.rw .meta{color:var(--mut);font-size:12px;margin-top:4px}.adv{color:var(--s3)}
   .muted{color:var(--mut);font-size:13px}
-  .tip{color:var(--mut);font-size:12px;margin-top:8px}
-  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:13px}
 </style>
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<link rel="stylesheet" href="css/nav.css">
 </head>
 <body>
 <header>
-  <h1>reqqa</h1><span class="sub">live requirement assessor · INCOSE GtWR v4 · E4B</span>
+  <h1>Live editor</h1>
   <span id="status"><span id="dot"></span><span id="stxt">connecting…</span></span>
 </header>
 <main>
   <section class="card">
-    <label class="lbl" for="req">Requirement</label>
-    <textarea id="req" placeholder="Type a requirement, e.g. &quot;The system shall respond to user requests within 2 seconds.&quot;"></textarea>
-    <div class="findings" id="findings"></div>
-    <div class="tip">Deterministic term rules flag instantly; the 9 INCOSE
-      characteristic judges (C1–C9) stream in — <b>fast-lane C3·C4·C5·C7 first</b>.</div>
+    <div class="reqhead"><label class="lbl" for="req">Requirement</label>
+      <span class="qhint" title="Deterministic term rules flag instantly (highlighted above & at right); the 9 INCOSE characteristic judges stream in — fast-lane C3·C4·C5·C7 first.">?</span>
+      <span class="reqscore" id="reqscore" title="overall score">—</span></div>
+    <div class="reqwrap">
+      <div class="backdrop reqfield" id="backdrop"></div>
+      <textarea id="req" class="reqfield" placeholder="Type a requirement, e.g. &quot;The system shall respond to user requests within 2 seconds.&quot;"></textarea>
+    </div>
   </section>
 
-  <section class="card">
-    <div class="overall"><span class="num" id="overall">—</span>
-      <span class="of">/ 5 overall</span>
-      <span class="muted" id="prog" style="margin-left:auto"></span></div>
-    <div class="bars" id="bars"></div>
-    <div class="review" id="review"></div>
-  </section>
+  <div class="cols">
+    <section class="card">
+      <div class="colhead"><h4>Characteristics</h4><span class="r muted" id="prog"></span></div>
+      <div class="chart" id="cRadar"></div>
+      <div class="bars" id="bars"></div>
+    </section>
+    <section class="card">
+      <div class="colhead"><h4>Rules</h4></div>
+      <div class="chart" id="rRadar"></div>
+      <div id="rcol"><div class="rnone">Start typing to see rule findings.</div></div>
+    </section>
+    <section class="card">
+      <div class="colhead"><h4>Suggested improvements</h4></div>
+      <div class="review" id="review"><div class="rnone">Suggestions appear for weak requirements.</div></div>
+    </section>
+  </div>
 </main>
 
+<script src="vendor/echarts.min.js"></script>
 <script src="vendor/socket.io.min.js"></script>
 <script>
 const CHARS=[["C1","Necessary"],["C2","Appropriate"],["C3","Unambiguous"],
   ["C4","Complete"],["C5","Singular"],["C6","Feasible"],["C7","Verifiable"],
   ["C8","Correct"],["C9","Conforming"]];
 const FAST=new Set(["C3","C4","C5","C7"]);
-const bars={}, barsEl=document.getElementById("bars");
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const uniq=a=>[...new Set(a)];
+
+// ---- rule metadata (names/categories/guidance) ----
+let RULES={};
+const rName=id=>(RULES[id]&&RULES[id].name)||'';
+const rCat =id=>(RULES[id]&&RULES[id].category)||'Other';
+const rText=id=>(RULES[id]&&RULES[id].text)||'';
+const CAT_PALETTE=['#2a78d6','#8a63d2','#0f9d8c','#d98324','#c0507a','#5a7a8c','#b0902a'];
+const _cc={}; const catColor=c=>(_cc[c]||(_cc[c]=CAT_PALETTE[Object.keys(_cc).length%CAT_PALETTE.length]));
+fetch('rules').then(r=>r.ok?r.json():{}).then(m=>{RULES=m||{};
+  ALLCATS=[...new Set(Object.values(RULES).map(x=>x.category).filter(Boolean))]; drawRadars();}).catch(()=>{});
+
+// ---- radars (echarts): Characteristics (C1–C9 scores) + Rules (category conformance),
+//      streaming like the dashboard's per-requirement detail ----
+const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const scoreColor=s=>cssVar('--s'+Math.max(1,Math.min(5,Math.round(s))))||cssVar('--mut');
+let ALLCATS=[]; const charScores={};
+const cRadar=echarts.init($("cRadar")), rRadar=echarts.init($("rRadar"));
+addEventListener("resize",()=>{cRadar.resize();rRadar.resize();});
+function cRadarOpt(){
+  const ax=cssVar('--mut'),line=cssVar('--line'),ids=CHARS.map(x=>x[0]);
+  const vals=ids.map(id=>charScores[id]||0), sc=vals.filter(v=>v);
+  const c0=scoreColor(sc.length?sc.reduce((a,b)=>a+b,0)/sc.length:3);
+  return {backgroundColor:'transparent',
+    radar:{indicator:ids.map(id=>({name:id,max:5})),radius:'64%',axisName:{color:ax,fontSize:10},splitNumber:5,
+      splitLine:{lineStyle:{color:line}},splitArea:{show:false},axisLine:{lineStyle:{color:line}}},
+    series:[{type:'radar',symbolSize:3,data:[{value:vals,areaStyle:{color:c0,opacity:.2},lineStyle:{color:c0,width:2},itemStyle:{color:c0},
+      label:{show:true,color:ax,fontSize:9,formatter:p=>p.value||''}}]}]};
+}
+function rRadarOpt(){
+  const ax=cssVar('--mut'),line=cssVar('--line'),c0=cssVar('--acc');
+  const cats=ALLCATS.length?ALLCATS:['Rules'], per={}, detIds=new Set(detFindings.map(f=>f.rule_id));
+  for(const f of detFindings) per[rCat(f.rule_id)]=(per[rCat(f.rule_id)]||0)+1;
+  judgeRules.forEach(id=>{if(!detIds.has(id))per[rCat(id)]=(per[rCat(id)]||0)+1;});
+  const conf=cats.map(cat=>Math.max(0,5-2*(per[cat]||0))), abbr=c=>(c.split(' ')[0]||c).slice(0,11);
+  return {backgroundColor:'transparent',
+    tooltip:{trigger:'item',extraCssText:'max-width:240px;white-space:normal',formatter:()=>cats.map(cat=>`${esc(cat)}: ${per[cat]||0}`).join('<br>')},
+    radar:{indicator:cats.map(cat=>({name:abbr(cat),max:5})),radius:'62%',axisName:{color:ax,fontSize:9},splitNumber:5,
+      splitLine:{lineStyle:{color:line}},splitArea:{show:false},axisLine:{lineStyle:{color:line}}},
+    series:[{type:'radar',symbolSize:3,data:[{value:conf,areaStyle:{color:c0,opacity:.18},lineStyle:{color:c0,width:2},itemStyle:{color:c0},
+      label:{show:true,color:ax,fontSize:9,formatter:p=>p.value}}]}]};
+}
+function drawRadars(){cRadar.setOption(cRadarOpt(),true);rRadar.setOption(rRadarOpt(),true);}
+window.reqoachRedraw=()=>{drawRadars();cRadar.resize();rRadar.resize();};
+function setScore(v){const el=$("reqscore");
+  if(v==null){el.textContent="—";el.style.background=cssVar('--mut')||"#6e7681";return;}
+  el.textContent=(+v).toFixed(2);el.style.background=scoreColor(v);}
+
+// ---- C tiles ----
+const bars={}, barsEl=$("bars");
 for(const [id,name] of CHARS){
   const d=document.createElement("div");
   d.className="b"+(FAST.has(id)?" fast":"");
-  d.innerHTML=`<span class="sc" id="sc-${id}">·</span>
-    <span class="nm">${id} ${name}</span>`;
+  d.innerHTML=`<span class="sc" id="sc-${id}">·</span><span class="nm">${id} ${name}</span>`;
   barsEl.appendChild(d); bars[id]=d;
-}
-const $=id=>document.getElementById(id);
-function resetScores(){
-  for(const [id] of CHARS){const d=bars[id];d.classList.remove("filled");
-    const sc=$("sc-"+id);sc.className="sc";sc.textContent="·";}
-  $("overall").textContent="—";$("review").innerHTML="";$("prog").textContent="";
 }
 function setChar(c){
   const d=bars[c.id];if(!d)return;d.classList.add("filled");
   const sc=$("sc-"+c.id);const s=c.score;
   sc.className="sc"+(s?(" s"+s):"");sc.textContent=s??"?";
   d.title=c.justification||c.error||"";
-}
-function renderFindings(fs){
-  const el=$("findings");el.innerHTML="";
-  if(!fs.length){el.innerHTML='<span class="chip muted">no term-rule flags</span>';return;}
-  for(const f of fs){
-    const terms=f.matches.map(m=>m.term).join(", ");
-    const c=document.createElement("span");c.className="chip";
-    c.innerHTML=`<b>${f.rule_id}</b> ${f.name}: ${terms}`;el.appendChild(c);
-  }
-}
-function renderReview(r){
-  const el=$("review");if(!r||r.error){el.innerHTML=r&&r.error?
-    `<div class="muted">review error: ${r.error}</div>`:"";return;}
-  let h='<label class="lbl">Suggested rewrite</label>';
-  for(const w of (r.rewrites||[])){
-    h+=`<div class="rw"><div class="txt">${w.text||""}</div>
-      <div class="meta">addresses ${(w.addresses||[]).join(", ")} — ${w.notes||""}</div></div>`;
-  }
-  for(const a of (r.advisories||[])){
-    h+=`<div class="rw"><div class="txt adv">${a.characteristic||""}: ${a.issue||""}</div>
-      <div class="meta">${a.suggestion||""}</div></div>`;
-  }
-  el.innerHTML=h;
+  charScores[c.id]=c.score||0; cRadar.setOption(cRadarOpt(),true);
 }
 
-// Derive the socket.io path from where this page is served so it works both at
-// the root (local :7802) and under the /reqoach/ proxy prefix. The page sits at
-// the app root, so its directory is the mount base.
+// ---- R column state (real-time: deterministic + judge-flagged) ----
+let detFindings=[], judgeRules=new Set();
+function renderRules(){
+  const el=$("rcol");
+  const detIds=new Set(detFindings.map(f=>f.rule_id));
+  const items=detFindings.map(f=>({rule:f.rule_id,det:true,terms:uniq((f.matches||[]).map(m=>m.term))}))
+    .concat([...judgeRules].filter(id=>!detIds.has(id)).map(id=>({rule:id,det:false,terms:[]})));
+  rRadar.setOption(rRadarOpt(),true);
+  if(!items.length){ el.innerHTML='<div class="rnone">No rule violations flagged.</div>'; return; }
+  const byCat={};
+  for(const it of items)(byCat[rCat(it.rule)]||(byCat[rCat(it.rule)]=[])).push(it);
+  el.innerHTML=Object.entries(byCat).map(([cat,its])=>`
+    <div class="rcat" style="color:${catColor(cat)}">${esc(cat)}</div>
+    ${its.map(it=>`
+      <div class="rfind ${it.det?'det':'llm'}" data-rule="${it.rule}">
+        <div class="rtop"><span class="rid">${it.rule}</span><span class="rnm">${esc(rName(it.rule))}</span>
+          <span class="src">${it.det?'deterministic':'judge-flagged'}</span></div>
+        ${rText(it.rule)?`<div class="guide">${esc(rText(it.rule))}</div>`:''}
+        ${it.terms.length?`<div class="terms">${it.terms.map(t=>`<span class="term">${esc(t)}</span>`).join('')}</div>`:''}
+      </div>`).join('')}`).join('');
+  // hover a finding -> light its span(s) in the requirement backdrop
+  el.querySelectorAll('.rfind[data-rule]').forEach(f=>{
+    const rid=f.dataset.rule;
+    f.addEventListener('mouseenter',()=>setSpan(rid,true,f));
+    f.addEventListener('mouseleave',()=>setSpan(rid,false,f));
+  });
+}
+function setSpan(rid,on,f){
+  $("backdrop").querySelectorAll('.hl').forEach(h=>{ if(h.dataset.rules.split(',').includes(rid)) h.classList.toggle('active',on); });
+  if(f) f.classList.toggle('active',on);
+}
+
+// ---- inline highlight overlay (offsets index the raw text) ----
+function paintBackdrop(){
+  const text=$("req").value;
+  const marks=[];
+  for(const f of detFindings) for(const m of (f.matches||[]))
+    if(typeof m.offset==='number'&&m.term) marks.push({s:m.offset,e:m.offset+m.term.length,rule:f.rule_id});
+  const n=text.length;
+  if(!marks.length||!n){ $("backdrop").textContent=text; return; }
+  const cover=new Array(n).fill(null);
+  for(const mk of marks) for(let i=Math.max(0,mk.s);i<Math.min(n,mk.e);i++)(cover[i]||(cover[i]=new Set())).add(mk.rule);
+  const key=i=>cover[i]?[...cover[i]].sort().join(','):'';
+  let out='',i=0;
+  while(i<n){
+    if(!cover[i]){let j=i;while(j<n&&!cover[j])j++;out+=esc(text.slice(i,j));i=j;}
+    else{const k=key(i);let j=i;while(j<n&&cover[j]&&key(j)===k)j++;
+      out+=`<span class="hl" data-rules="${k}">${esc(text.slice(i,j))}</span>`;i=j;}
+  }
+  $("backdrop").innerHTML=out;
+}
+
+function renderReview(r){
+  const el=$("review");   // now a permanent 3rd column; show a placeholder when empty
+  if(!r){ el.innerHTML='<div class="rnone">Suggestions appear for weak requirements.</div>'; return; }
+  if(r.error){ el.innerHTML=`<div class="muted">review error: ${esc(r.error)}</div>`; return; }
+  let h="";
+  for(const w of (r.rewrites||[])) h+=`<div class="rw"><div class="txt">${esc(w.text||"")}</div><div class="meta">addresses ${(w.addresses||[]).join(", ")} — ${esc(w.notes||"")}</div></div>`;
+  for(const a of (r.advisories||[])) h+=`<div class="rw"><div class="txt adv">${esc(a.characteristic||"")}: ${esc(a.issue||"")}</div><div class="meta">${esc(a.suggestion||"")}</div></div>`;
+  el.innerHTML=h||'<div class="rnone">No suggestions — this requirement looks clean.</div>';
+}
+
+function resetAll(){
+  for(const [id] of CHARS){const d=bars[id];d.classList.remove("filled");const sc=$("sc-"+id);sc.className="sc";sc.textContent="·";delete charScores[id];}
+  setScore(null);$("prog").textContent="";
+  detFindings=[]; judgeRules=new Set(); renderRules(); paintBackdrop(); renderReview(null); drawRadars();
+}
+
+// ---- socket.io (subpath-aware; works at root and under /reqoach/) ----
 const _base=location.pathname.replace(/[^/]*$/,"");
 const socket=io({path:_base+"socket.io"});
 const dot=$("dot"),stxt=$("stxt");
@@ -148,22 +273,27 @@ socket.on("connect",()=>{dot.className="on";stxt.textContent="connected";});
 socket.on("disconnect",()=>{dot.className="";stxt.textContent="disconnected";});
 let curGen=0;
 socket.on("start",e=>{curGen=e.gen;dot.className="busy";stxt.textContent="assessing…";});
-socket.on("idle",()=>{resetScores();$("findings").innerHTML=
-  '<span class="chip muted">keep typing… (min 12 chars)</span>';
+socket.on("idle",()=>{resetAll();$("rcol").innerHTML='<div class="rnone">Keep typing… (min 12 chars)</div>';
   dot.className="on";stxt.textContent="connected";});
-socket.on("deterministic",e=>{if(e.gen!==curGen)return;renderFindings(e.findings);});
+socket.on("deterministic",e=>{if(e.gen!==curGen)return;detFindings=e.findings||[];renderRules();paintBackdrop();});
 socket.on("characteristic",e=>{if(e.gen!==curGen)return;setChar(e.data);
+  (e.data.rules_triggered||[]).forEach(r=>judgeRules.add(r));renderRules();
   $("prog").textContent=`judged ${e.i}/${e.n}`;});
 socket.on("review",e=>{if(e.gen!==curGen)return;renderReview(e.data);});
-socket.on("done",e=>{if(e.gen!==curGen)return;
-  $("overall").textContent=e.overall??"—";$("prog").textContent="done";
+socket.on("done",e=>{if(e.gen!==curGen)return;setScore(e.overall);$("prog").textContent="done";
   dot.className="on";stxt.textContent="connected";});
 
+// keep the highlight overlay aligned + scroll-synced while typing
+const ta=$("req"), bd=$("backdrop");
+ta.addEventListener("scroll",()=>{bd.scrollTop=ta.scrollTop;bd.scrollLeft=ta.scrollLeft;});
 let t=null;
-$("req").addEventListener("input",e=>{
+ta.addEventListener("input",e=>{
   clearTimeout(t);const text=e.target.value;
-  t=setTimeout(()=>{resetScores();socket.emit("assess",{text});},600);
+  paintBackdrop();                                  // reflect new text immediately (clears stale spans)
+  t=setTimeout(()=>{resetAll();socket.emit("assess",{text});},600);
 });
+drawRadars();   // initial empty radars
 </script>
+<script src="js/nav.js"></script>
 </body>
 </html>

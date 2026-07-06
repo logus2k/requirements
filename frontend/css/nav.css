@@ -1,0 +1,47 @@
+/* Shared top navigation for all reqoach pages (dashboard, ingest, monitor,
+   editor). Injected by js/nav.js. Uses fallback var chains so it themes
+   correctly whether a page defines the dashboard var names (--ink/--muted/
+   --border/--surface) or the editor/monitor names (--fg/--mut/--line/--panel). */
+.reqoach-nav{
+  display:flex; align-items:center; gap:2px;
+  padding:0 16px; height:46px;
+  background:var(--panel, var(--surface, #fff));
+  border-bottom:1px solid var(--line, var(--border, rgba(128,128,128,.2)));
+  position:sticky; top:0; z-index:100;
+  font:14px/1 system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+.reqoach-nav .brand{
+  font-weight:700; font-size:15px; letter-spacing:.01em; text-decoration:none;
+  color:var(--fg, var(--ink, #111)); margin-right:16px;
+}
+.reqoach-nav a.item{
+  color:var(--mut, var(--muted, #777)); text-decoration:none;
+  padding:8px 13px; border-radius:8px; font-size:13.5px; white-space:nowrap;
+}
+.reqoach-nav a.item:hover{
+  background:var(--panel2, rgba(128,128,128,.10));
+  color:var(--fg, var(--ink, #111));
+}
+.reqoach-nav a.item.active{
+  color:var(--fg, var(--ink, #111)); font-weight:600;
+  background:var(--panel2, rgba(128,128,128,.12));
+}
+.reqoach-nav .spacer{flex:1}
+.reqoach-nav .tbtn{
+  border:1px solid var(--line, var(--border, rgba(128,128,128,.25)));
+  background:transparent; color:var(--fg, var(--ink, #111));
+  border-radius:8px; padding:6px 11px; cursor:pointer; font-size:13px;
+}
+.reqoach-nav .tbtn:hover{background:var(--panel2, rgba(128,128,128,.10))}
+
+/* Scrollbars — noted panel style: thin, rounded, transparent track; the thumb is
+   a translucent accent that appears when the scrollable area is hovered. Uses
+   fallback var chains so it themes on every page (dashboard --accent, editor --acc). */
+*{scrollbar-width:thin;scrollbar-color:transparent transparent}
+*:hover{scrollbar-color:color-mix(in srgb, var(--accent, var(--acc, #6096e5)) 55%, transparent) transparent}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent;margin:4px 0}
+::-webkit-scrollbar-thumb{background:transparent;border-radius:5px;transition:background .2s ease}
+:hover::-webkit-scrollbar-thumb{background:color-mix(in srgb, var(--accent, var(--acc, #6096e5)) 50%, transparent)}
+::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb, var(--accent, var(--acc, #6096e5)) 80%, transparent)}
+::-webkit-scrollbar-corner{background:transparent}
