@@ -230,21 +230,45 @@
   if (window.SCORECARD) {                      // single-document inlined build
     showOnly(window.SCORECARD.source_file);
     loadScorecard(window.SCORECARD);
-  } else {                                     // multi-document: fetch the index
-    const loadDoc = file => fetch('data/' + file)
-      .then(r => { if (!r.ok) throw new Error(r.status + ' ' + file); return r.json(); })
-      .then(loadScorecard)
-      .catch(e => { showOnly('failed to load ' + file); console.error(e); });
+  } else {                                     // multi-document mode
+    // The picker merges two sources: curated static scorecards under data/, and
+    // documents assessed live through the orchestration API (GET documents ->
+    // GET documents/{id}/scorecard). Option values are tagged "static:<file>" or
+    // "api:<doc_id>" so the loader knows where to fetch from. Either source may
+    // be absent (e.g. a static-only deploy, or the API unreachable) — we merge
+    // whatever loads.
+    const loadDoc = value => {
+      const i = value.indexOf(':'), src = value.slice(0, i), id = value.slice(i + 1);
+      const url = src === 'api' ? 'documents/' + id + '/scorecard' : 'data/' + id;
+      return fetch(url)
+        .then(r => { if (!r.ok) throw new Error(r.status + ' ' + id); return r.json(); })
+        .then(loadScorecard)
+        .catch(e => { showOnly('failed to load ' + id); console.error(e); });
+    };
 
-    fetch('data/index.json')
-      .then(r => { if (!r.ok) throw new Error('index.json ' + r.status); return r.json(); })
-      .then(docs => {
-        if (!Array.isArray(docs) || !docs.length) { showOnly('no documents in data/index.json'); return; }
-        sel.innerHTML = docs.map(d => `<option value="${esc(d.file)}">${esc(d.name)}</option>`).join('');
-        fitDocSel();
-        sel.onchange = () => { fitDocSel(); loadDoc(sel.value); };
-        loadDoc(docs[0].file);
-      })
-      .catch(e => { showOnly('failed to load data/index.json'); console.error(e); });
+    const staticP = fetch('data/index.json')
+      .then(r => r.ok ? r.json() : [])
+      .then(d => Array.isArray(d) ? d : []).catch(() => []);
+    const apiP = fetch('documents')
+      .then(r => r.ok ? r.json() : { documents: [] })
+      .then(d => (d && d.documents) || []).catch(() => []);
+
+    Promise.all([staticP, apiP]).then(([statics, apis]) => {
+      const opts = statics.map(d => ({ value: 'static:' + d.file, name: d.name }));
+      for (const d of apis) {
+        if (!d.total) continue;                // skip empty/failed jobs
+        opts.push({ value: 'api:' + d.doc_id, name: d.source_file + ' · ' + d.total });
+      }
+      if (!opts.length) { showOnly('no documents'); return; }
+      sel.innerHTML = opts.map(o => `<option value="${esc(o.value)}">${esc(o.name)}</option>`).join('');
+      // Deep-link: ?doc=<doc_id> (from the monitor's "open full report") pre-selects
+      // that assessed document; otherwise show the first.
+      const want = new URLSearchParams(location.search).get('doc');
+      const startVal = (want && opts.find(o => o.value === 'api:' + want) || opts[0]).value;
+      sel.value = startVal;
+      fitDocSel();
+      sel.onchange = () => { fitDocSel(); loadDoc(sel.value); };
+      loadDoc(startVal);
+    });
   }
 })();

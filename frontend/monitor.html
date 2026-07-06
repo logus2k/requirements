@@ -191,7 +191,7 @@ socket.on("scorecard",e=>{const sc=e.data;
   $("sub").textContent=sc.source_file||"assessment";});
 socket.on("job_done",e=>{dot.className="on";stxt.textContent="done";
   $("banner").innerHTML=`<b>✓ Complete</b> — ${records.length} requirements assessed. `+
-    (e.doc_id?`<a href="${base}api-scorecard.html?doc=${e.doc_id}">open full report</a>`:"");});
+    (e.doc_id?`<a href="${base}index.html?doc=${e.doc_id}">open full report</a>`:"");});
 socket.on("job_error",e=>{dot.className="";stxt.textContent="error";
   $("banner").innerHTML=`<span style="color:var(--s1)">Job error: ${e.message||"unknown"}</span>`;});
 </script>
