@@ -36,6 +36,8 @@
   .scorelbl{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-weight:600}
   .reqscore{min-width:56px;text-align:center;border-radius:8px;padding:3px 10px;
     font-weight:700;font-size:18px;color:var(--fg);font-variant-numeric:tabular-nums}
+  .reqconf{min-width:52px;text-align:center;border-radius:8px;padding:3px 10px;
+    font-weight:700;font-size:16px;color:#fff;background:#6e7681;font-variant-numeric:tabular-nums}
   .chart{width:100%;height:196px}
   /* requirement field with an inline highlight overlay behind the textarea */
   .reqwrap{position:relative;margin-top:8px}
@@ -78,6 +80,11 @@
   .rfind.det{border-left:3px solid var(--acc)}
   .rfind.llm{border-left:3px dashed var(--mut)}
   .rfind.active{box-shadow:0 0 0 2px var(--acc)}
+  .rfind.hit{box-shadow:0 0 0 2px var(--acc);background:var(--panel2)}
+  .backdrop .hl.hit{background:rgba(208,59,59,.34)}
+  .wordtip{position:absolute;z-index:30;background:var(--panel);border:1px solid var(--line);
+    border-radius:6px;padding:4px 9px;font-size:12px;color:var(--fg);white-space:nowrap;
+    box-shadow:0 6px 18px rgba(0,0,0,.28);pointer-events:none;display:none}
   .rfind .rtop{display:flex;align-items:baseline;gap:8px}
   .rfind .rid{font-weight:600}.rfind .rnm{color:var(--fg);opacity:.8}
   .rfind .src{margin-left:auto;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
@@ -104,7 +111,9 @@
     <div class="reqhead"><label class="lbl" for="req">Requirement</label>
       <span class="qhint" title="Deterministic term rules flag instantly (highlighted above & at right); the 9 INCOSE characteristic judges stream in — fast-lane C3·C4·C5·C7 first.">?</span>
       <span class="scorelbl">AVG SCORE</span>
-      <span class="reqscore" id="reqscore" title="overall score">—</span></div>
+      <span class="reqscore" id="reqscore" title="overall score">—</span>
+      <span class="scorelbl" style="margin-left:16px">CONFORMANCE</span>
+      <span class="reqconf" id="reqconf" title="rule conformance">—</span></div>
     <div class="reqwrap">
       <div class="backdrop reqfield" id="backdrop"></div>
       <textarea id="req" class="reqfield" placeholder="Type a requirement, e.g. &quot;The system shall respond to user requests within 2 seconds.&quot;"></textarea>
@@ -187,6 +196,19 @@ function drawRadars(){cRadar.setOption(cRadarOpt(),true);rRadar.setOption(rRadar
 window.reqoachRedraw=()=>{drawRadars();cRadar.resize();rRadar.resize();};
 function setScore(v){const el=$("reqscore");   // no background; colour follows the theme (--fg)
   el.textContent=(v==null)?"—":(+v).toFixed(2);}
+// Rule conformance = mean per-category conformance (max(0,5-2*count))/5 over ALLCATS,
+// mirroring the Rules radar. Secondary indicator to AVG SCORE; violations in the tooltip.
+function setConf(){const el=$("reqconf"); const cats=ALLCATS;
+  if(!cats.length){clearConf();return;}
+  const per={}, detIds=new Set(detFindings.map(f=>f.rule_id)); let viol=0;
+  for(const f of detFindings){per[rCat(f.rule_id)]=(per[rCat(f.rule_id)]||0)+1;viol++;}
+  judgeRules.forEach(id=>{if(!detIds.has(id)){per[rCat(id)]=(per[rCat(id)]||0)+1;viol++;}});
+  const mean=cats.reduce((a,c)=>a+Math.max(0,5-2*(per[c]||0)),0)/cats.length;
+  const pct=Math.round(mean/5*100);
+  el.textContent=pct+"%"; el.style.background=scoreColor(pct/20);
+  el.title=viol+" rule violation"+(viol!==1?"s":"");}
+function clearConf(){const el=$("reqconf");el.textContent="—";
+  el.style.background=cssVar('--mut')||"#6e7681";el.title="rule conformance";}
 
 // ---- C tiles ----
 const bars={}, barsEl=$("bars");
@@ -252,7 +274,7 @@ function paintBackdrop(){
   while(i<n){
     if(!cover[i]){let j=i;while(j<n&&!cover[j])j++;out+=esc(text.slice(i,j));i=j;}
     else{const k=key(i);let j=i;while(j<n&&cover[j]&&key(j)===k)j++;
-      out+=`<span class="hl" data-rules="${k}">${esc(text.slice(i,j))}</span>`;i=j;}
+      out+=`<span class="hl" data-rules="${k}" data-s="${i}" data-e="${j}">${esc(text.slice(i,j))}</span>`;i=j;}
   }
   $("backdrop").innerHTML=out;
 }
@@ -290,7 +312,7 @@ $("review").addEventListener("click",e=>{
 function resetAll(){
   for(const [id] of CHARS){const d=bars[id];d.classList.remove("filled");const sc=$("sc-"+id);sc.className="sc";sc.textContent="·";delete charScores[id];const j=$("just-"+id);if(j)j.textContent="";}
   setScore(null);$("prog").textContent="";
-  detFindings=[]; judgeRules=new Set(); renderRules(); paintBackdrop(); renderReview(null); drawRadars();
+  detFindings=[]; judgeRules=new Set(); renderRules(); paintBackdrop(); renderReview(null); drawRadars(); clearConf();
 }
 
 // ---- socket.io (subpath-aware; works at root and under /reqoach/) ----
@@ -303,12 +325,12 @@ let curGen=0;
 socket.on("start",e=>{curGen=e.gen;dot.className="busy";stxt.textContent="assessing…";});
 socket.on("idle",()=>{resetAll();$("rcol").innerHTML='';
   dot.className="on";stxt.textContent="connected";});
-socket.on("deterministic",e=>{if(e.gen!==curGen)return;detFindings=e.findings||[];renderRules();paintBackdrop();});
+socket.on("deterministic",e=>{if(e.gen!==curGen)return;detFindings=e.findings||[];renderRules();paintBackdrop();setConf();});
 socket.on("characteristic",e=>{if(e.gen!==curGen)return;setChar(e.data);
-  (e.data.rules_triggered||[]).forEach(r=>judgeRules.add(r));renderRules();
+  (e.data.rules_triggered||[]).forEach(r=>judgeRules.add(r));renderRules();setConf();
   $("prog").textContent=`judged ${e.i}/${e.n}`;});
 socket.on("review",e=>{if(e.gen!==curGen)return;renderReview(e.data);});
-socket.on("done",e=>{if(e.gen!==curGen)return;setScore(e.overall);$("prog").textContent="";
+socket.on("done",e=>{if(e.gen!==curGen)return;setScore(e.overall);setConf();$("prog").textContent="";
   dot.className="on";stxt.textContent="connected";});
 
 // keep the highlight overlay aligned + scroll-synced while typing
@@ -317,9 +339,40 @@ ta.addEventListener("scroll",()=>{bd.scrollTop=ta.scrollTop;bd.scrollLeft=ta.scr
 let t=null;
 ta.addEventListener("input",e=>{
   clearTimeout(t);const text=e.target.value;
-  paintBackdrop();                                  // reflect new text immediately (clears stale spans)
+  paintBackdrop(); clearHit();                      // reflect new text immediately (clears stale spans)
   t=setTimeout(()=>{resetAll();socket.emit("assess",{text});},600);
 });
+
+// ---- click/caret on an underlined word -> select + scroll its rule finding, show a tooltip ----
+// (the word sits under the textarea, so we map the caret offset to a backdrop span, same as
+//  the dashboard's word<->finding linkage but driven by the caret instead of hover.)
+let hitEls=[];
+function clearHit(){
+  hitEls.forEach(el=>el.classList.remove('hit')); hitEls=[];
+  bd.querySelectorAll('.hl.hit').forEach(h=>h.classList.remove('hit'));
+  const tip=$("wordtip"); if(tip) tip.style.display='none';
+}
+function wordFinding(){
+  const off=ta.selectionStart;
+  const span=[...bd.querySelectorAll('.hl')].find(h=>off>=+h.dataset.s && off<=+h.dataset.e);
+  clearHit();
+  if(!span) return;
+  span.classList.add('hit');
+  const rules=span.dataset.rules.split(',');
+  rules.forEach(rid=>$("rcol").querySelectorAll(`.rfind[data-rule="${rid}"]`).forEach(f=>{f.classList.add('hit');hitEls.push(f);}));
+  if(hitEls[0]) hitEls[0].scrollIntoView({block:'nearest',behavior:'smooth'});
+  let tip=$("wordtip");
+  if(!tip){ tip=document.createElement('div'); tip.id='wordtip'; tip.className='wordtip'; document.querySelector('.reqwrap').appendChild(tip); }
+  tip.textContent=rules.map(r=>`${r} ${rName(r)}`.trim()).join(' · ');
+  const wrap=document.querySelector('.reqwrap').getBoundingClientRect(), r=span.getBoundingClientRect();
+  tip.style.display='block';
+  tip.style.left=Math.max(0,r.left-wrap.left)+'px';
+  const above=r.top-wrap.top;
+  if(above<tip.offsetHeight+6){ tip.style.top=(r.bottom-wrap.top+4)+'px'; }   // flip below if it would clip the top
+  else { tip.style.top=(above-tip.offsetHeight-4)+'px'; }
+}
+['click','keyup','mouseup'].forEach(ev=>ta.addEventListener(ev,wordFinding));
+ta.addEventListener('scroll',clearHit);
 drawRadars();   // initial empty radars
 </script>
 <script src="js/nav.js"></script>

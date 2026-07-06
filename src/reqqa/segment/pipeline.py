@@ -112,6 +112,8 @@ def segment_items(
                 existing = None
             else:
                 existing = _extract_existing_id(raw.source_item.text)
+            if existing:
+                existing = re.sub(r"[.\s]+$", "", existing) or None   # a trailing '.' isn't part of the ID
             req_id = unique_id(existing)
             src = raw.source_item
             requirements.append(DiscreteRequirement(

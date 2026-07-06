@@ -13,6 +13,7 @@
   let D, names, health, byId;                 // current scorecard + derived
   let sortKey = 'overall', sortDir = 1, currentRows = [];
   let drawerChart = null, drawerRuleChart = null, openReq = null, selReqId = null;
+  let suggReqChart = null, suggReqRuleChart = null;   // radars for a requirement shown in the sugg column
   let RCATS = [];   // INCOSE rule categories present in the current document (radar axes)
   const charts = {};
 
@@ -42,6 +43,12 @@
     .replace(/^(?:\s*<br>\s*•?\s*)+/, '');
 
   const hEl = document.getElementById('health');
+  let docConf = null;                       // document-level rule conformance %
+  function paintDocConf() {
+    const el = document.getElementById('ruleconf'); if (!el) return;
+    if (docConf == null) { el.textContent = '–'; el.style.color = ''; }
+    else { el.textContent = docConf + '%'; el.style.color = scoreColor(docConf / 20); }
+  }
   const drawer = document.getElementById('drawer');
 
   // The detail pane is an inline layout component (master–detail), not an overlay.
@@ -205,6 +212,26 @@
   const badgeAvg = s => s == null ? '<span class="muted">–</span>'
     : `<span class="badge" style="background:${scoreColor(s)}">${(+s).toFixed(2)}</span>`;
 
+  // ---- Rule conformance: a secondary rules indicator paired with the quality score ----
+  // Per-requirement rule violations by INCOSE category (deterministic + judge-flagged, deduped).
+  function reqRuleStats(r) {
+    const per = {}, detIds = new Set((r.deterministic_findings || []).map(f => f.rule_id)), seen = new Set();
+    let viol = 0;
+    for (const f of (r.deterministic_findings || [])) { per[ruleCat(f.rule_id)] = (per[ruleCat(f.rule_id)] || 0) + 1; viol++; }
+    for (const c of CHARS) for (const id of (r.characteristics[c].rules_triggered || []))
+      if (!detIds.has(id) && !seen.has(id)) { seen.add(id); per[ruleCat(id)] = (per[ruleCat(id)] || 0) + 1; viol++; }
+    return { per, viol };
+  }
+  // Conformance % = mean per-category conformance (max(0,5-2*count))/5, over the doc's categories.
+  // Mirrors the Rules radar (100% = a full/clean radar), so the badge and radar always agree.
+  function confPct(per) {
+    if (!RCATS.length) return null;
+    const m = RCATS.reduce((a, cat) => a + Math.max(0, 5 - 2 * (per[cat] || 0)), 0) / RCATS.length;
+    return Math.round(m / 5 * 100);
+  }
+  const confBadge = pct => pct == null ? '<span class="muted">–</span>'
+    : `<span class="badge" style="background:${scoreColor(pct / 20)}">${pct}%</span>`;
+
   // ---- sortable requirements table ----
   const sortVal = (r, k) =>
     k === 'req_id' ? r.req_id :
@@ -302,6 +329,7 @@
       <div class="detail-head">
         <h3 style="display:flex;align-items:center;gap:10px;margin-top:0">${r.req_id}<span class="badge" style="background:${scoreColor(r.overall)};margin-left:auto">${(+r.overall).toFixed(2)}</span></h3>
         <div class="muted" style="font-size:12px">${esc(provStr(r))}</div>
+        ${(() => { const s = reqRuleStats(r); return `<div class="muted" style="font-size:12px;margin-top:3px">Rule conformance ${confBadge(confPct(s.per))} · ${s.viol} violation${s.viol !== 1 ? 's' : ''}</div>`; })()}
         <div class="rtext" id="rtext">${highlightText(r)}</div>
         <div class="dcharts">
           <div class="col"><h4>Characteristics</h4><div id="reqRadar" style="height:200px;margin:2px 0"></div></div>
@@ -325,8 +353,16 @@
     wireRuleLinkage();
   }
 
+  // Criticality colour of a suggestion = worst (lowest) score among the characteristics it
+  // addresses — same colour codes as the Live Editor's suggestion borders.
+  const critColor = (r, cids) => {
+    const s = (cids || []).map(c => { const m = String(c).match(/C\d/); return m && r.characteristics[m[0]] ? r.characteristics[m[0]].score : 0; }).filter(x => x);
+    return s.length ? scoreColor(Math.min(...s)) : cssVar('--muted');
+  };
+
   // Suggested improvements for the selected requirement — its own right-hand panel.
   function renderSugg(r) {
+    disposeSuggCharts();               // in case a requirement detail was showing here
     const el = document.getElementById('suggBody');
     const rev = r && r.review;
     let h = '<h4 class="suggh">Suggested improvements</h4>';
@@ -335,15 +371,46 @@
       h += '<div class="rnone">' + (r ? 'No suggestions — this requirement scored well.'
                                        : 'Select a requirement to see suggestions.') + '</div>';
     } else {
-      h += rw.map(w => `<div class="cchar"><b>rewrite</b> → ${esc(w.text)}<div class="muted" style="font-size:12px">${esc(w.notes || '')}</div></div>`).join('');
-      h += adv.map(x => `<div class="cchar"><b>${esc(x.characteristic)} advisory</b>: ${esc(x.issue)}<div class="just">${esc(x.suggestion)}</div></div>`).join('');
+      h += rw.map(w => `<div class="cchar" style="border-left:3px solid ${critColor(r, w.addresses)}"><b>rewrite</b> → ${esc(w.text)}<div class="muted" style="font-size:12px">${esc(w.notes || '')}</div></div>`).join('');
+      h += adv.map(x => `<div class="cchar" style="border-left:3px solid ${critColor(r, [x.characteristic])}"><b>${esc(x.characteristic)} advisory</b>: ${esc(x.issue)}<div class="just">${esc(x.suggestion)}</div></div>`).join('');
     }
     el.innerHTML = h;
   }
 
+  // Full requirement detail rendered into the Suggested Improvements column (stacked to
+  // fit the narrow width) — used when a requirement is picked from the rule-centric panel,
+  // so the rule panel stays put in the middle. The sugg column scrolls as a whole.
+  function disposeSuggCharts() {
+    if (suggReqChart) { suggReqChart.dispose(); suggReqChart = null; }
+    if (suggReqRuleChart) { suggReqRuleChart.dispose(); suggReqRuleChart = null; }
+  }
+  function openReqInSugg(r) {
+    disposeSuggCharts();
+    const el = document.getElementById('suggBody');
+    const s = reqRuleStats(r);
+    el.innerHTML = `
+      <div class="sreq">
+        <h3 style="display:flex;align-items:center;gap:10px;margin:0 0 2px">${esc(r.req_id)}<span class="badge" style="background:${scoreColor(r.overall)};margin-left:auto">${(+r.overall).toFixed(2)}</span></h3>
+        <div class="muted" style="font-size:12px">${esc(provStr(r))}</div>
+        <div class="muted" style="font-size:12px;margin-top:3px">Rule conformance ${confBadge(confPct(s.per))} · ${s.viol} violation${s.viol !== 1 ? 's' : ''}</div>
+        <div class="rtext">${highlightText(r)}</div>
+        <div class="dcharts stacked">
+          <div class="col"><h4>Characteristics</h4><div id="sreqRadar" style="height:200px;margin:2px 0"></div></div>
+          <div class="col"><h4>Rules</h4><div id="sreqRuleRadar" style="height:200px;margin:2px 0"></div></div>
+        </div>
+        <div class="col">${CHARS.map(c => cCard(r, c)).join('')}</div>
+        <div class="col">${rColumn(r)}</div>
+      </div>`;
+    suggReqChart = echarts.init(document.getElementById('sreqRadar'));
+    suggReqChart.setOption(reqRadarOpt(r));
+    suggReqRuleChart = echarts.init(document.getElementById('sreqRuleRadar'));
+    suggReqRuleChart.setOption(reqRuleRadarOpt(r));
+    wireRuleLinkage(el);
+  }
+
   // hover a rule finding <-> its highlighted span(s); click a finding -> rule panel
-  function wireRuleLinkage() {
-    const body = document.getElementById('drawerBody');
+  function wireRuleLinkage(body) {
+    body = body || document.getElementById('drawerBody');
     const set = (rid, on) => {
       body.querySelectorAll('.hl').forEach(h => { if (h.dataset.rules.split(',').includes(rid)) h.classList.toggle('active', on); });
       body.querySelectorAll(`.rfind[data-rule="${rid}"]`).forEach(f => f.classList.toggle('active', on));
@@ -384,31 +451,16 @@
           <span class="rid">${esc(r.req_id)}</span>${badgeAvg(r.overall)}</div>
           <div class="just">${esc(r.text.slice(0, 130))}${r.text.length > 130 ? '…' : ''}</div>
           ${ts.length ? `<div class="terms">${ts.map(t => `<span class="term">${esc(t)}</span>`).join('')}</div>` : ''}</div>`; }).join('')}</div>`;
+    // Clicking a requirement opens its FULL detail in the Suggested Improvements column,
+    // leaving this rule panel in place so you can scan a rule's requirements side by side.
     document.querySelectorAll('#drawerBody .rclick[data-req]').forEach(el =>
-      el.addEventListener('click', () => { const r = D.requirements.find(x => x.req_id === el.dataset.req); if (r) openDrawer(r); }));
+      el.addEventListener('click', () => { const r = D.requirements.find(x => x.req_id === el.dataset.req); if (r) openReqInSugg(r); }));
     selReqId = null;
     renderSugg(null);
     showDetail();
   }
 
-  // ---- overlaps side panel ----
-  function openOverlaps() {
-    if (drawerChart) { drawerChart.dispose(); drawerChart = null; }
-    if (drawerRuleChart) { drawerRuleChart.dispose(); drawerRuleChart = null; }
-    openReq = null;
-    const ov = D.set_level.overlaps || [];
-    document.getElementById('drawerBody').innerHTML = `<div class="panel-scroll">
-      <h3>Confirmed overlaps <span class="muted">(${ov.length})</span></h3>
-      <div class="muted" style="font-size:12px;margin-bottom:8px">Requirement pairs judged to duplicate or substantially overlap.</div>
-      ${ov.map(o => { const a = byId[o.a_id], b = byId[o.b_id]; return `
-        <div class="cchar ovpair"><div class="top">
-          <span class="name">${o.a_id} ~ ${o.b_id}</span><span class="sc">${o.score}</span></div>
-          <div class="just">${a ? esc(a.text.slice(0, 96)) : o.a_id}</div>
-          <div class="just">${b ? esc(b.text.slice(0, 96)) : o.b_id}</div></div>`; }).join('')}</div>`;
-    selReqId = null;
-    renderSugg(null);
-    showDetail();
-  }
+  // (Confirmed overlaps now live on their own page — overlaps.html, linked from the nav.)
 
   function renderAll() {
     charts.radar.setOption(radarOpt(), true);
@@ -432,8 +484,10 @@
       : Math.round(mean(CHARS.map(c => m[c])) * 100) / 100;
     byId = Object.fromEntries(D.requirements.map(r => [r.req_id, r]));
     hEl.textContent = health.toFixed(2); hEl.style.color = scoreColor(health);
-    document.getElementById('ovcount').textContent = (D.set_level.overlaps || []).length;
     RCATS = categoryRollup().map(x => x.cat);   // fixed radar axes for per-req rules radar
+    const _cs = D.requirements.map(r => confPct(reqRuleStats(r).per)).filter(v => v != null);
+    docConf = _cs.length ? Math.round(_cs.reduce((a, b) => a + b, 0) / _cs.length) : null;
+    paintDocConf();
     openReq = null;
     renderAll();
     renderTable();
@@ -473,7 +527,6 @@
     const tr = document.querySelector(`#reqrows tr[data-i="${i}"]`);
     if (tr) tr.scrollIntoView({ block: 'nearest' });
   });
-  document.getElementById('ovBtn').addEventListener('click', openOverlaps);
   // Collapse/expand the chart row to give the bottom panels more height.
   document.getElementById('chartsToggle').onclick = () => {
     document.body.classList.toggle('charts-collapsed');   // CSS swaps the up/down-circle icon
@@ -482,28 +535,42 @@
   // The shared top nav (js/nav.js) owns the theme toggle; re-render on its event.
   window.addEventListener('reqoach:theme', () => {
     hEl.style.color = scoreColor(health);
+    paintDocConf();
     renderAll();
   });
   window.addEventListener('resize', () => {
     Object.values(charts).forEach(c => c.resize());
     if (drawerChart) drawerChart.resize();
     if (drawerRuleChart) drawerRuleChart.resize();
+    if (suggReqChart) suggReqChart.resize();
+    if (suggReqRuleChart) suggReqRuleChart.resize();
   });
 
-  // ---- document picker (the subtitle select) ----
-  const sel = document.getElementById('docsel');
-  const measureCtx = document.createElement('canvas').getContext('2d');
-  // Size the select to its selected option so the caret sits right after the
-  // current document's title (a native select otherwise sizes to the widest
-  // option). +24px leaves room for the caret and a little slack.
-  function fitDocSel() {
-    const opt = sel.options[sel.selectedIndex];
-    if (!opt) return;
-    const cs = getComputedStyle(sel);
-    measureCtx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-    sel.style.width = Math.ceil(measureCtx.measureText(opt.text).width) + 24 + 'px';
+  // ---- document picker: a custom themed dropdown (native <select> popups can't be styled) ----
+  const pick = document.getElementById('docpick');
+  const pickBtn = document.getElementById('docpickBtn');
+  const pickLabel = document.getElementById('docpickLabel');
+  const pickMenu = document.getElementById('docpickMenu');
+  let docOpts = [], docValue = null, onDocChange = null;
+  const splitName = name => { const i = name.lastIndexOf(' · ');
+    return i >= 0 ? { main: name.slice(0, i), cnt: name.slice(i + 3) } : { main: name, cnt: '' }; };
+  function setLabel() { const o = docOpts.find(x => x.value === docValue); pickLabel.textContent = o ? o.name : ''; }
+  function renderMenu() {
+    pickMenu.innerHTML = docOpts.map(o => { const s = splitName(o.name);
+      return `<div class="docpick-item" role="option" data-val="${esc(o.value)}" aria-selected="${o.value === docValue}">`
+        + `<span class="nm">${esc(s.main)}</span>${s.cnt ? `<span class="cnt">${esc(s.cnt)}</span>` : ''}</div>`; }).join('');
   }
-  const showOnly = txt => { sel.innerHTML = `<option>${esc(txt)}</option>`; fitDocSel(); };
+  const menuOpen = () => !pickMenu.hidden;
+  function openMenu() { if (!docOpts.length) return; renderMenu(); pickMenu.hidden = false; pick.dataset.open = 'true'; pickBtn.setAttribute('aria-expanded', 'true'); }
+  function closeMenu() { pickMenu.hidden = true; pick.dataset.open = 'false'; pickBtn.setAttribute('aria-expanded', 'false'); }
+  pickBtn.addEventListener('click', e => { e.stopPropagation(); menuOpen() ? closeMenu() : openMenu(); });
+  pickMenu.addEventListener('click', e => { const it = e.target.closest('.docpick-item'); if (!it) return;
+    const v = it.dataset.val; closeMenu(); if (v !== docValue) { docValue = v; setLabel(); if (onDocChange) onDocChange(v); } });
+  document.addEventListener('click', () => { if (menuOpen()) closeMenu(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && menuOpen()) closeMenu(); });
+  // Boot API (mirrors the old <select>'s role): populate options / show a bare label.
+  function setDocOptions(opts, startVal, onChange) { docOpts = opts; docValue = startVal; onDocChange = onChange; setLabel(); }
+  const showOnly = txt => { docOpts = []; docValue = null; onDocChange = null; pickLabel.textContent = txt; };
 
   // Rule metadata (names, categories, guidance) for the R findings + chart.
   // Best-effort: a static-only deploy without the API just falls back to bare ids.
@@ -543,14 +610,11 @@
         opts.push({ value: 'api:' + d.doc_id, name: d.source_file + ' · ' + d.total });
       }
       if (!opts.length) { showOnly('no documents'); return; }
-      sel.innerHTML = opts.map(o => `<option value="${esc(o.value)}">${esc(o.name)}</option>`).join('');
       // Deep-link: ?doc=<doc_id> (from the monitor's "open full report") pre-selects
       // that assessed document; otherwise show the first.
       const want = new URLSearchParams(location.search).get('doc');
       const startVal = (want && opts.find(o => o.value === 'api:' + want) || opts[0]).value;
-      sel.value = startVal;
-      fitDocSel();
-      sel.onchange = () => { fitDocSel(); loadDoc(sel.value); };
+      setDocOptions(opts, startVal, loadDoc);
       loadDoc(startVal);
     });
   }

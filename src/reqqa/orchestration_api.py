@@ -135,6 +135,19 @@ class JobManager:
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 api = FastAPI(title="reqoach")
 api.add_middleware(GZipMiddleware, minimum_size=1024)   # big scorecard JSON
+
+
+@api.middleware("http")
+async def _revalidate_assets(request, call_next):
+    """Serve HTML/JS/CSS with `Cache-Control: no-cache` so browsers always revalidate
+    (cheap 304 via the ETag) instead of silently serving a stale bundle after a rebuild."""
+    resp = await call_next(request)
+    path = request.url.path
+    if path.endswith((".html", ".js", ".css")) or path.endswith("/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 jm = JobManager(sio)
 
 

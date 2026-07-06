@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Requirements Quality — INCOSE Assessment</title>
+<title>reqoach</title>
 <style>
   :root{
     --surface:#fcfcfb; --plane:#e9e9e9; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
@@ -24,30 +24,36 @@
     font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;line-height:1.45;
     overflow-y:hidden;height:100vh;display:flex;flex-direction:column}
   header{display:flex;align-items:center;gap:18px;padding:16px 22px;border-bottom:1px solid var(--border);flex:none}
-  header h1{font-size:16px;margin:0;font-weight:600}
+  header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
   header .doc{color:var(--ink2);font-size:13px}
-  .health{margin-left:auto;text-align:right}
+  .hwrap{margin-left:auto;display:flex;gap:26px;align-items:flex-start}
+  .health{text-align:right}
   .health .n{font-size:30px;font-weight:700;line-height:1}
   .health .l{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
   .toggle{border:1px solid var(--border);background:var(--surface);color:var(--ink);
     border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px}
-  /* The document subtitle IS the picker: a native select styled as plain title
-     text, with a caret drawn by the wrapper at the right of the selected name.
-     app.js sizes the select to the selected option so the caret hugs the text. */
-  .doctitle{position:relative;display:inline-flex;align-items:center;margin-top:1px}
-  .doctitle::after{content:'';position:absolute;right:4px;top:50%;transform:translateY(-50%);
-    pointer-events:none;width:14px;height:14px;background:var(--muted);
+  /* The document subtitle IS the picker: a custom themed dropdown (a native
+     <select> popup can't be styled — it renders in the OS chrome). */
+  .docpick{position:relative;margin-top:1px}
+  .docpick-btn{display:inline-flex;align-items:center;gap:7px;max-width:620px;
+    background:transparent;border:1px solid transparent;border-radius:8px;
+    color:var(--ink2);font:inherit;font-size:13px;line-height:1.3;
+    padding:3px 8px 3px 7px;cursor:pointer;text-align:left}
+  .docpick-btn:hover{color:var(--ink);background:var(--plane)}
+  .docpick-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .docpick-caret{width:15px;height:15px;flex:none;background:var(--muted);transition:transform .15s;
     -webkit-mask:url(icons/down-circle-outlined.svg) center/contain no-repeat;
             mask:url(icons/down-circle-outlined.svg) center/contain no-repeat}
-  .doctitle select{appearance:none;-webkit-appearance:none;background:transparent;border:none;
-    outline:none;color:var(--ink2);font:inherit;font-size:13px;line-height:1.3;
-    padding:1px 22px 1px 0;margin:0;max-width:560px;white-space:nowrap;overflow:hidden;
-    text-overflow:ellipsis;cursor:pointer}
-  .doctitle select:hover{color:var(--ink)}
-  .doctitle select:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
-  /* the popup list options must carry the theme colors, else they're invisible
-     (light text on the browser's default white) until hovered in dark mode */
-  .doctitle select option{background:var(--surface);color:var(--ink)}
+  .docpick[data-open="true"] .docpick-caret{background:var(--accent);transform:rotate(180deg)}
+  .docpick-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:200;
+    min-width:300px;max-width:560px;max-height:62vh;overflow:auto;
+    background:var(--surface);border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 12px 34px rgba(0,0,0,.30);padding:6px}
+  .docpick-item{display:flex;align-items:baseline;gap:10px;padding:8px 11px;border-radius:7px;
+    cursor:pointer;color:var(--ink);font-size:13px;white-space:nowrap}
+  .docpick-item:hover{background:var(--plane)}
+  .docpick-item[aria-selected="true"]{background:color-mix(in srgb,var(--accent) 16%,var(--surface));font-weight:600}
+  .docpick-item .cnt{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
   /* Consolidated page (no overlay/slide): a full-width row of summary charts on
      top, then the requirements table (left) + selected-requirement detail (right). */
   /* Three panels across the bottom: table | requirement detail (C|R) | suggestions.
@@ -121,6 +127,10 @@
   .detail-col > #drawerBody{flex:1;min-height:0;display:flex;flex-direction:column}
   .detail-head{flex:none}
   .dcharts{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:6px}
+  /* a requirement detail shown in the (narrow) suggestions column: stack the radars */
+  .dcharts.stacked{grid-template-columns:1fr}
+  .sreq .rtext{margin:10px 0}
+  .sreq > .col{margin-top:10px}
   .detail-scroll{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px}
   /* single-column scroll body for the rule-centric / overlaps panels (they fill #drawerBody
      directly, which is a fixed-height flex column, so they need their own scroll region) */
@@ -166,9 +176,11 @@
   .rfind .rid{font-weight:600} .rfind .rnm{color:var(--ink2)}
   .rfind .src{margin-left:auto;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
   .rfind .guide{color:var(--ink2);font-size:12px;margin-top:3px}
-  .rfind .terms{margin-top:6px;display:flex;flex-wrap:wrap;gap:5px}
+  .terms{display:flex;flex-wrap:wrap;gap:5px}   /* chips wrap at the panel width, never overflow */
+  .rfind .terms{margin-top:6px}
   .term{background:var(--plane);border:1px solid var(--border);border-radius:5px;padding:1px 7px;
-    font-size:12px;color:var(--s1);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    font-size:12px;color:var(--s1);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    overflow-wrap:anywhere}
   .rnone{color:var(--muted);font-size:12.5px;padding:6px 2px}
   /* inline highlight of offending spans in the requirement text (--s1 is stable across themes) */
   .hl{background:rgba(208,59,59,.14);border-bottom:2px solid var(--s1);border-radius:2px;cursor:help}
@@ -184,16 +196,24 @@
 </head>
 <body>
 <header>
-  <div><h1>Requirements Quality — INCOSE GtWR v4</h1>
-    <div class="doctitle"><select id="docsel" title="Select document"></select></div></div>
-  <div class="health"><div class="n" id="health"></div><div class="l">avg quality / 5</div></div>
+  <div><h1>REQUIREMENTS QUALITY</h1>
+    <div class="docpick" id="docpick" data-open="false">
+      <button class="docpick-btn" id="docpickBtn" aria-haspopup="listbox" aria-expanded="false" title="Select document">
+        <span class="docpick-label" id="docpickLabel"></span><span class="docpick-caret"></span>
+      </button>
+      <div class="docpick-menu" id="docpickMenu" role="listbox" hidden></div>
+    </div></div>
+  <div class="hwrap">
+    <div class="health"><div class="n" id="ruleconf"></div><div class="l">rule conformance</div></div>
+    <div class="health"><div class="n" id="health"></div><div class="l">avg quality / 5</div></div>
+  </div>
   <button class="caret" id="chartsToggle" title="Collapse / expand the chart row"></button>
 </header>
 <section class="charts">
   <div class="card"><h2>Characteristic profile</h2>
     <div class="sub">Mean score per characteristic (C1–C9)</div>
     <div class="chart" id="radar"></div></div>
-  <div class="card"><h2>Most-violated rules</h2>
+  <div class="card"><h2>Top Violated Rules</h2>
     <div class="sub"># requirements per rule</div>
     <div class="chart" id="rules"></div></div>
   <div class="card"><h2>Score distribution</h2>
@@ -201,11 +221,9 @@
     <div class="chart" id="dist"></div></div>
   <div class="card"><h2>Set-level (C10–C15)</h2>
     <div class="sub">Over the whole set</div>
-    <div class="chart" id="setlevel"></div>
-    <div class="muted" style="font-size:11px"><span id="ovcount"></span> overlaps —
-      <button id="ovBtn" class="linkbtn">view all →</button></div></div>
+    <div class="chart" id="setlevel"></div></div>
   <div class="card"><h2>Rules · Conformance</h2>
-    <div class="sub">by category · 5 = clean (derived)</div>
+    <div class="sub">per category · higher = fewer violations (5 = none)</div>
     <div class="chart" id="rcat_radar"></div></div>
   <div class="card"><h2>Rules · Composition</h2>
     <div class="sub">share by category</div>
@@ -217,8 +235,7 @@
 
 <div class="split">
   <div class="list-col">
-    <div class="card"><h2>Requirements</h2>
-      <div class="sub">Click a header to sort · click a row to see its assessment at right →</div>
+    <div class="card">
       <div class="tablewrap"><table><thead><tr>
         <th data-key="req_id">ID<span class="ind"></span></th>
         <th data-key="text">Requirement<span class="ind"></span></th>

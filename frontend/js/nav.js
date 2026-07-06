@@ -12,9 +12,10 @@
 (function () {
   "use strict";
   const PAGES = [
-    { href: "index.html",  label: "Dashboard" },
-    { href: "ingest.html", label: "Assess a document" },
-    { href: "editor.html", label: "Live editor" },
+    { href: "index.html",    label: "Dashboard" },
+    { href: "overlaps.html", label: "Overlaps" },
+    { href: "ingest.html",   label: "Assess a document" },
+    { href: "editor.html",   label: "Live editor" },
   ];
   const cur = location.pathname.split("/").pop() || "index.html";
 
