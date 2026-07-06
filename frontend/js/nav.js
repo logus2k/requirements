@@ -36,4 +36,9 @@
     if (typeof window.reqoachRedraw === "function") window.reqoachRedraw();
     window.dispatchEvent(new CustomEvent("reqoach:theme", { detail: t }));
   });
+
+  // If the page has a connection LED (#status), relocate it into the nav so it sits
+  // in the SAME position on every page — at the far right, after the Theme button.
+  const led = document.getElementById("status");
+  if (led) { nav.appendChild(led); led.removeAttribute("hidden"); }
 })();

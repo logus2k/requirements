@@ -22,22 +22,24 @@
     border-bottom:1px solid var(--line);background:var(--panel)}
   header h1{font-size:16px;margin:0;font-weight:600}
   header .sub{color:var(--mut);font-size:13px}
-  #status{margin-left:auto;font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px}
+  #status{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px;margin-left:12px}
+  #status[hidden]{display:none}
   #dot{width:9px;height:9px;border-radius:50%;background:#6e7681}
   #dot.on{background:var(--s4)} #dot.busy{background:var(--s3);animation:pulse 1s infinite}
   @keyframes pulse{50%{opacity:.3}}
-  main{max-width:1440px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:16px}
+  main{max-width:1728px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:16px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
   label.lbl{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-weight:600}
   .reqhead{display:flex;align-items:center;gap:8px}
   .qhint{width:16px;height:16px;border-radius:50%;border:1px solid var(--line);color:var(--mut);
     font-size:11px;font-weight:700;display:inline-grid;place-items:center;cursor:help}
-  .reqscore{margin-left:auto;min-width:56px;text-align:center;border-radius:8px;padding:3px 10px;
-    font-weight:700;font-size:18px;color:#fff;background:#6e7681;font-variant-numeric:tabular-nums}
+  .scorelbl{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-weight:600}
+  .reqscore{min-width:56px;text-align:center;border-radius:8px;padding:3px 10px;
+    font-weight:700;font-size:18px;color:var(--fg);font-variant-numeric:tabular-nums}
   .chart{width:100%;height:196px}
   /* requirement field with an inline highlight overlay behind the textarea */
   .reqwrap{position:relative;margin-top:8px}
-  .reqfield{width:100%;min-height:110px;padding:12px;border:1px solid var(--line);border-radius:8px;
+  .reqfield{width:100%;min-height:84px;padding:12px;border:1px solid var(--line);border-radius:8px;
     font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.7;
     letter-spacing:normal;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word}
   .backdrop{position:absolute;inset:0;color:transparent;pointer-events:none;overflow:auto;
@@ -58,13 +60,15 @@
   .overall .num{font-size:22px;font-weight:700} .overall .of{color:var(--mut);font-size:12px}
   /* C tiles */
   .bars{display:grid;grid-template-columns:1fr;gap:8px}
-  .b{display:flex;align-items:center;gap:8px;font-size:13px;padding:7px 9px;border-radius:7px;
-    background:var(--panel2);border:1px solid var(--line);opacity:.4;transition:opacity .2s}
+  .b{padding:8px 10px;border-radius:7px;background:var(--panel2);border:1px solid var(--line);
+    opacity:.4;transition:opacity .2s}
   .b.filled{opacity:1}
+  .btop{display:flex;align-items:center;gap:8px;font-size:13px}
+  .bjust{color:var(--fg);opacity:.72;font-size:12px;margin-top:5px;line-height:1.4}
+  .bjust:empty{display:none}
   .b .sc{width:22px;height:22px;border-radius:5px;display:grid;place-items:center;
     color:#fff;font-weight:700;font-size:12px;flex:none;background:#6e7681}
   .b .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .b.fast{box-shadow:inset 3px 0 0 var(--acc)}
   .b .sc.s1{background:var(--s1)}.b .sc.s2{background:var(--s2)}.b .sc.s3{background:var(--s3)}
   .b .sc.s4{background:var(--s4)}.b .sc.s5{background:var(--s5)}
   /* R findings (mirror the dashboard drawer) */
@@ -84,6 +88,9 @@
   .rnone{color:var(--mut);font-size:12.5px;padding:6px 2px}
   /* review */
   .review .rw{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-top:8px}
+  .review .rw.apply{cursor:pointer;transition:box-shadow .12s}
+  .review .rw.apply:hover{box-shadow:0 0 0 2px var(--acc)}
+  .applyhint{color:var(--acc)}
   .rw .txt{font-weight:500}.rw .meta{color:var(--mut);font-size:12px;margin-top:4px}.adv{color:var(--s3)}
   .muted{color:var(--mut);font-size:13px}
 </style>
@@ -91,14 +98,12 @@
 <link rel="stylesheet" href="css/nav.css">
 </head>
 <body>
-<header>
-  <h1>Live editor</h1>
-  <span id="status"><span id="dot"></span><span id="stxt">connecting…</span></span>
-</header>
+<span id="status" hidden><span id="dot"></span><span id="stxt">connecting…</span></span>
 <main>
   <section class="card">
     <div class="reqhead"><label class="lbl" for="req">Requirement</label>
       <span class="qhint" title="Deterministic term rules flag instantly (highlighted above & at right); the 9 INCOSE characteristic judges stream in — fast-lane C3·C4·C5·C7 first.">?</span>
+      <span class="scorelbl">AVG SCORE</span>
       <span class="reqscore" id="reqscore" title="overall score">—</span></div>
     <div class="reqwrap">
       <div class="backdrop reqfield" id="backdrop"></div>
@@ -115,7 +120,7 @@
     <section class="card">
       <div class="colhead"><h4>Rules</h4></div>
       <div class="chart" id="rRadar"></div>
-      <div id="rcol"><div class="rnone">Start typing to see rule findings.</div></div>
+      <div id="rcol"></div>
     </section>
     <section class="card">
       <div class="colhead"><h4>Suggested improvements</h4></div>
@@ -163,37 +168,40 @@ function cRadarOpt(){
       label:{show:true,color:ax,fontSize:9,formatter:p=>p.value||''}}]}]};
 }
 function rRadarOpt(){
-  const ax=cssVar('--mut'),line=cssVar('--line'),c0=cssVar('--acc');
+  const ax=cssVar('--mut'),line=cssVar('--line');
   const cats=ALLCATS.length?ALLCATS:['Rules'], per={}, detIds=new Set(detFindings.map(f=>f.rule_id));
   for(const f of detFindings) per[rCat(f.rule_id)]=(per[rCat(f.rule_id)]||0)+1;
   judgeRules.forEach(id=>{if(!detIds.has(id))per[rCat(id)]=(per[rCat(id)]||0)+1;});
   const conf=cats.map(cat=>Math.max(0,5-2*(per[cat]||0))), abbr=c=>(c.split(' ')[0]||c).slice(0,11);
+  // Same colour scale as the Characteristics radar: colour by the mean of the plotted
+  // (conformance) values — green = rule-clean, red = many violations. Same 0-5 polarity.
+  const c0=scoreColor(conf.length?conf.reduce((a,b)=>a+b,0)/conf.length:3);
   return {backgroundColor:'transparent',
     tooltip:{trigger:'item',extraCssText:'max-width:240px;white-space:normal',formatter:()=>cats.map(cat=>`${esc(cat)}: ${per[cat]||0}`).join('<br>')},
     radar:{indicator:cats.map(cat=>({name:abbr(cat),max:5})),radius:'62%',axisName:{color:ax,fontSize:9},splitNumber:5,
       splitLine:{lineStyle:{color:line}},splitArea:{show:false},axisLine:{lineStyle:{color:line}}},
-    series:[{type:'radar',symbolSize:3,data:[{value:conf,areaStyle:{color:c0,opacity:.18},lineStyle:{color:c0,width:2},itemStyle:{color:c0},
+    series:[{type:'radar',symbolSize:3,data:[{value:conf,areaStyle:{color:c0,opacity:.2},lineStyle:{color:c0,width:2},itemStyle:{color:c0},
       label:{show:true,color:ax,fontSize:9,formatter:p=>p.value}}]}]};
 }
 function drawRadars(){cRadar.setOption(cRadarOpt(),true);rRadar.setOption(rRadarOpt(),true);}
 window.reqoachRedraw=()=>{drawRadars();cRadar.resize();rRadar.resize();};
-function setScore(v){const el=$("reqscore");
-  if(v==null){el.textContent="—";el.style.background=cssVar('--mut')||"#6e7681";return;}
-  el.textContent=(+v).toFixed(2);el.style.background=scoreColor(v);}
+function setScore(v){const el=$("reqscore");   // no background; colour follows the theme (--fg)
+  el.textContent=(v==null)?"—":(+v).toFixed(2);}
 
 // ---- C tiles ----
 const bars={}, barsEl=$("bars");
 for(const [id,name] of CHARS){
   const d=document.createElement("div");
   d.className="b"+(FAST.has(id)?" fast":"");
-  d.innerHTML=`<span class="sc" id="sc-${id}">·</span><span class="nm">${id} ${name}</span>`;
+  d.innerHTML=`<div class="btop"><span class="sc" id="sc-${id}">·</span><span class="nm">${id} ${name}</span></div>
+    <div class="bjust" id="just-${id}"></div>`;
   barsEl.appendChild(d); bars[id]=d;
 }
 function setChar(c){
   const d=bars[c.id];if(!d)return;d.classList.add("filled");
   const sc=$("sc-"+c.id);const s=c.score;
   sc.className="sc"+(s?(" s"+s):"");sc.textContent=s??"?";
-  d.title=c.justification||c.error||"";
+  const j=$("just-"+c.id); if(j) j.textContent=c.justification||c.error||"";
   charScores[c.id]=c.score||0; cRadar.setOption(cRadarOpt(),true);
 }
 
@@ -249,18 +257,38 @@ function paintBackdrop(){
   $("backdrop").innerHTML=out;
 }
 
+// Criticality colour = worst score among the addressed characteristics (redder = worse).
+function critColor(cids){
+  const s=(cids||[]).map(c=>{const m=String(c).match(/C\d/);return m?charScores[m[0]]:0;}).filter(x=>x);
+  return s.length?scoreColor(Math.min(...s)):cssVar('--mut');
+}
+let lastRewrites=[];
 function renderReview(r){
   const el=$("review");   // now a permanent 3rd column; show a placeholder when empty
+  lastRewrites=[];
   if(!r){ el.innerHTML='<div class="rnone">Suggestions appear for weak requirements.</div>'; return; }
   if(r.error){ el.innerHTML=`<div class="muted">review error: ${esc(r.error)}</div>`; return; }
+  lastRewrites=r.rewrites||[];
   let h="";
-  for(const w of (r.rewrites||[])) h+=`<div class="rw"><div class="txt">${esc(w.text||"")}</div><div class="meta">addresses ${(w.addresses||[]).join(", ")} — ${esc(w.notes||"")}</div></div>`;
-  for(const a of (r.advisories||[])) h+=`<div class="rw"><div class="txt adv">${esc(a.characteristic||"")}: ${esc(a.issue||"")}</div><div class="meta">${esc(a.suggestion||"")}</div></div>`;
+  // Rewrites are clickable → apply into the requirement (advisories are not).
+  lastRewrites.forEach((w,i)=>{ h+=`<div class="rw apply" data-rw="${i}" title="Click to apply this rewrite" style="border-left:3px solid ${critColor(w.addresses)}">
+    <div class="txt">${esc(w.text||"")}</div>
+    <div class="meta">addresses ${(w.addresses||[]).join(", ")} — ${esc(w.notes||"")} · <b class="applyhint">apply →</b></div></div>`; });
+  for(const a of (r.advisories||[])) h+=`<div class="rw" style="border-left:3px solid ${critColor([a.characteristic])}"><div class="txt adv">${esc(a.characteristic||"")}: ${esc(a.issue||"")}</div><div class="meta">${esc(a.suggestion||"")}</div></div>`;
   el.innerHTML=h||'<div class="rnone">No suggestions — this requirement looks clean.</div>';
 }
+// Apply a rewrite: replace the requirement text and re-assess immediately.
+function applyRewrite(text){
+  const ta=$("req"); ta.value=text; ta.focus();
+  clearTimeout(t); paintBackdrop(); resetAll(); socket.emit("assess",{text});
+}
+$("review").addEventListener("click",e=>{
+  const card=e.target.closest(".rw.apply"); if(!card) return;
+  const w=lastRewrites[+card.dataset.rw]; if(w&&w.text) applyRewrite(w.text);
+});
 
 function resetAll(){
-  for(const [id] of CHARS){const d=bars[id];d.classList.remove("filled");const sc=$("sc-"+id);sc.className="sc";sc.textContent="·";delete charScores[id];}
+  for(const [id] of CHARS){const d=bars[id];d.classList.remove("filled");const sc=$("sc-"+id);sc.className="sc";sc.textContent="·";delete charScores[id];const j=$("just-"+id);if(j)j.textContent="";}
   setScore(null);$("prog").textContent="";
   detFindings=[]; judgeRules=new Set(); renderRules(); paintBackdrop(); renderReview(null); drawRadars();
 }
@@ -273,14 +301,14 @@ socket.on("connect",()=>{dot.className="on";stxt.textContent="connected";});
 socket.on("disconnect",()=>{dot.className="";stxt.textContent="disconnected";});
 let curGen=0;
 socket.on("start",e=>{curGen=e.gen;dot.className="busy";stxt.textContent="assessing…";});
-socket.on("idle",()=>{resetAll();$("rcol").innerHTML='<div class="rnone">Keep typing… (min 12 chars)</div>';
+socket.on("idle",()=>{resetAll();$("rcol").innerHTML='';
   dot.className="on";stxt.textContent="connected";});
 socket.on("deterministic",e=>{if(e.gen!==curGen)return;detFindings=e.findings||[];renderRules();paintBackdrop();});
 socket.on("characteristic",e=>{if(e.gen!==curGen)return;setChar(e.data);
   (e.data.rules_triggered||[]).forEach(r=>judgeRules.add(r));renderRules();
   $("prog").textContent=`judged ${e.i}/${e.n}`;});
 socket.on("review",e=>{if(e.gen!==curGen)return;renderReview(e.data);});
-socket.on("done",e=>{if(e.gen!==curGen)return;setScore(e.overall);$("prog").textContent="done";
+socket.on("done",e=>{if(e.gen!==curGen)return;setScore(e.overall);$("prog").textContent="";
   dot.className="on";stxt.textContent="connected";});
 
 // keep the highlight overlay aligned + scroll-synced while typing

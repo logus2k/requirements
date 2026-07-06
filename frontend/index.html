@@ -35,14 +35,19 @@
      text, with a caret drawn by the wrapper at the right of the selected name.
      app.js sizes the select to the selected option so the caret hugs the text. */
   .doctitle{position:relative;display:inline-flex;align-items:center;margin-top:1px}
-  .doctitle::after{content:'▾';position:absolute;right:5px;pointer-events:none;
-    color:var(--muted);font-size:11px}
+  .doctitle::after{content:'';position:absolute;right:4px;top:50%;transform:translateY(-50%);
+    pointer-events:none;width:14px;height:14px;background:var(--muted);
+    -webkit-mask:url(icons/down-circle-outlined.svg) center/contain no-repeat;
+            mask:url(icons/down-circle-outlined.svg) center/contain no-repeat}
   .doctitle select{appearance:none;-webkit-appearance:none;background:transparent;border:none;
     outline:none;color:var(--ink2);font:inherit;font-size:13px;line-height:1.3;
     padding:1px 22px 1px 0;margin:0;max-width:560px;white-space:nowrap;overflow:hidden;
     text-overflow:ellipsis;cursor:pointer}
   .doctitle select:hover{color:var(--ink)}
   .doctitle select:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+  /* the popup list options must carry the theme colors, else they're invisible
+     (light text on the browser's default white) until hovered in dark mode */
+  .doctitle select option{background:var(--surface);color:var(--ink)}
   /* Consolidated page (no overlay/slide): a full-width row of summary charts on
      top, then the requirements table (left) + selected-requirement detail (right). */
   /* Three panels across the bottom: table | requirement detail (C|R) | suggestions.
@@ -56,9 +61,16 @@
   .charts .card .sub{font-size:10.5px;margin-bottom:6px}
   .charts .opt{color:var(--muted);font-weight:400}
   body.charts-collapsed .charts{display:none}          /* caret in the header collapses the chart row */
-  .caret{border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:8px;
-    padding:5px 10px;cursor:pointer;font-size:13px;line-height:1}
+  .caret{border:1px solid var(--border);background:var(--surface);border-radius:8px;
+    width:30px;height:28px;padding:0;cursor:pointer;display:inline-grid;place-items:center}
+  .caret::before{content:'';width:18px;height:18px;background:var(--ink2);
+    -webkit-mask:url(icons/up-circle-outlined.svg) center/contain no-repeat;
+            mask:url(icons/up-circle-outlined.svg) center/contain no-repeat}
   .caret:hover{background:var(--plane)}
+  /* charts visible → up-circle (click to collapse); collapsed → down-circle (click to expand) */
+  body.charts-collapsed .caret::before{
+    -webkit-mask-image:url(icons/down-circle-outlined.svg);
+            mask-image:url(icons/down-circle-outlined.svg)}
   /* Bottom panels fill the remaining viewport height and scroll internally. */
   .split{display:flex;gap:16px;align-items:stretch;padding:14px 22px 16px;flex:1;min-height:0}
   .list-col{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -110,6 +122,9 @@
   .detail-head{flex:none}
   .dcharts{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:6px}
   .detail-scroll{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px}
+  /* single-column scroll body for the rule-centric / overlaps panels (they fill #drawerBody
+     directly, which is a fixed-height flex column, so they need their own scroll region) */
+  .panel-scroll{flex:1;min-height:0;overflow:auto}
   .sugg-col{width:var(--sugg-w)}
   .detail-col[hidden]{display:none}
   .suggh{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
@@ -172,7 +187,7 @@
   <div><h1>Requirements Quality — INCOSE GtWR v4</h1>
     <div class="doctitle"><select id="docsel" title="Select document"></select></div></div>
   <div class="health"><div class="n" id="health"></div><div class="l">avg quality / 5</div></div>
-  <button class="caret" id="chartsToggle" title="Collapse / expand the chart row">▾</button>
+  <button class="caret" id="chartsToggle" title="Collapse / expand the chart row"></button>
 </header>
 <section class="charts">
   <div class="card"><h2>Characteristic profile</h2>

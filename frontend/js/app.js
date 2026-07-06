@@ -90,8 +90,11 @@
   }
   function distOpt() {
     const t = T(), d = D.aggregates.score_distribution;
+    const total = [1,2,3,4,5].reduce((a, s) => a + (d[s] || 0), 0);
     return { backgroundColor: 'transparent', grid: { left: 34, right: 14, top: 12, bottom: 24 },
-      tooltip: { trigger: 'axis' },
+      tooltip: { trigger: 'axis',
+        formatter: p => { const v = p[0].value, pct = total ? (v / total * 100).toFixed(1) : '0';
+          return `${pct}% · ${v} requirement${v !== 1 ? 's' : ''}`; } },
       xAxis: { type: 'category', data: ['1','2','3','4','5'], name: 'score',
         nameTextStyle: { color: t.muted }, axisLabel: { color: t.ink2 }, axisLine: { lineStyle: { color: t.axis } } },
       yAxis: { type: 'value', axisLabel: { color: t.muted }, splitLine: { lineStyle: { color: t.grid } } },
@@ -102,7 +105,7 @@
   function setOpt() {
     const t = T(), a = D.set_level.set_assessment;
     return { backgroundColor: 'transparent', grid: { left: 40, right: 26, top: 6, bottom: 18 },
-      tooltip: { trigger: 'axis', confine: true, extraCssText: 'max-width:340px;white-space:normal;word-break:break-word',
+      tooltip: { trigger: 'axis', appendToBody: true, extraCssText: 'max-width:340px;white-space:normal;word-break:break-word',
         formatter: p => {
           const it = a.find(x => x.characteristic === p[0].name);
           return `<b>${esc(it.characteristic)}</b> ${it.score}/5<br>${esc(it.justification || '')}`; } },
@@ -145,8 +148,11 @@
   }
   function rcatBarOpt() {                   // C · magnitude per category
     const t = T(), e = [...categoryRollup()].reverse();
+    const total = e.reduce((a, x) => a + x.count, 0);
     return { backgroundColor: 'transparent', grid: { left: 96, right: 34, top: 6, bottom: 8 },
-      tooltip: { trigger: 'item' },
+      tooltip: { trigger: 'item',
+        formatter: p => { const pct = total ? (p.value / total * 100).toFixed(1) : '0';
+          return `<b>${esc(p.name)}</b><br>${p.value} violation${p.value !== 1 ? 's' : ''} · ${pct}%`; } },
       xAxis: { type: 'value', axisLabel: { show: false }, splitLine: { lineStyle: { color: t.grid } } },
       yAxis: { type: 'category', data: e.map(x => x.cat), axisLabel: { color: t.ink2, fontSize: 10, width: 84, overflow: 'truncate' },
         axisLine: { lineStyle: { color: t.axis } }, axisTick: { show: false } },
@@ -179,6 +185,9 @@
     for (const c of CHARS) for (const id of (r.characteristics[c].rules_triggered || []))
       if (!detIds.has(id) && !seen.has(id)) { seen.add(id); per[ruleCat(id)] = (per[ruleCat(id)] || 0) + 1; }
     const conf = RCATS.map(cat => Math.max(0, 5 - 2 * (per[cat] || 0)));   // 5 = clean, integer for clean labels
+    // Same colour scale as the Characteristics radar: colour by the mean conformance,
+    // so green = rule-clean, red = many violations (same 0-5 polarity as the C radar).
+    const c0 = scoreColor(conf.length ? conf.reduce((a, b) => a + b, 0) / conf.length : 3);
     return { backgroundColor: 'transparent',
       tooltip: { trigger: 'item', extraCssText: 'max-width:240px;white-space:normal',
         formatter: () => RCATS.map(cat => `${esc(cat)}: ${per[cat] || 0}`).join('<br>') },
@@ -186,7 +195,7 @@
         axisName: { color: t.ink2, fontSize: 9 }, splitNumber: 5,
         splitLine: { lineStyle: { color: t.grid } }, splitArea: { show: false }, axisLine: { lineStyle: { color: t.grid } } },
       series: [{ type: 'radar', symbolSize: 3, data: [{ value: conf,
-        areaStyle: { color: t.accent, opacity: 0.18 }, lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent },
+        areaStyle: { color: c0, opacity: 0.2 }, lineStyle: { color: c0, width: 2 }, itemStyle: { color: c0 },
         label: { show: true, color: t.ink2, fontSize: 9, formatter: p => p.value } }] }] };
   }
 
@@ -291,7 +300,7 @@
     openReq = r;
     document.getElementById('drawerBody').innerHTML = `
       <div class="detail-head">
-        <h3 style="display:flex;align-items:center;gap:10px">${r.req_id}<span class="badge" style="background:${scoreColor(r.overall)};margin-left:auto">${(+r.overall).toFixed(2)}</span></h3>
+        <h3 style="display:flex;align-items:center;gap:10px;margin-top:0">${r.req_id}<span class="badge" style="background:${scoreColor(r.overall)};margin-left:auto">${(+r.overall).toFixed(2)}</span></h3>
         <div class="muted" style="font-size:12px">${esc(provStr(r))}</div>
         <div class="rtext" id="rtext">${highlightText(r)}</div>
         <div class="dcharts">
@@ -362,16 +371,19 @@
     const hits = D.requirements.filter(r => (r.deterministic_findings || []).some(f => f.rule_id === ruleId)
       || CHARS.some(c => (r.characteristics[c].rules_triggered || []).includes(ruleId)));
     document.getElementById('drawerBody').innerHTML = `
-      <h3>${ruleId} · ${esc(m.name || '')}</h3>
-      <div class="muted" style="font-size:12px">${esc(m.category || 'Other')}${m.detector ? ' · ' + esc(m.detector) : ''} · ${hits.length} requirement${hits.length !== 1 ? 's' : ''}</div>
-      ${m.text ? `<div class="rtext">${esc(m.text)}</div>` : ''}
-      ${(m.terms && m.terms.length) ? `<div class="terms" style="margin:8px 0 4px">${m.terms.slice(0, 40).map(t => `<span class="term">${esc(t)}</span>`).join('')}${m.terms.length > 40 ? ' <span class="muted">…</span>' : ''}</div>` : ''}
-      <h4 style="margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Requirements (${hits.length})</h4>
+      <div class="detail-head">
+        <h3 style="margin-top:0">${ruleId} · ${esc(m.name || '')}</h3>
+        <div class="muted" style="font-size:12px">${esc(m.category || 'Other')}${m.detector ? ' · ' + esc(m.detector) : ''} · ${hits.length} requirement${hits.length !== 1 ? 's' : ''}</div>
+        ${m.text ? `<div class="rtext">${esc(m.text)}</div>` : ''}
+        ${(m.terms && m.terms.length) ? `<div class="terms" style="margin:8px 0 4px">${m.terms.slice(0, 40).map(t => `<span class="term">${esc(t)}</span>`).join('')}${m.terms.length > 40 ? ' <span class="muted">…</span>' : ''}</div>` : ''}
+        <h4 style="margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Requirements (${hits.length})</h4>
+      </div>
+      <div class="panel-scroll">
       ${hits.map(r => { const ts = detTerms(r); return `
         <div class="cchar rclick" data-req="${esc(r.req_id)}"><div class="top">
           <span class="rid">${esc(r.req_id)}</span>${badgeAvg(r.overall)}</div>
           <div class="just">${esc(r.text.slice(0, 130))}${r.text.length > 130 ? '…' : ''}</div>
-          ${ts.length ? `<div class="terms">${ts.map(t => `<span class="term">${esc(t)}</span>`).join('')}</div>` : ''}</div>`; }).join('')}`;
+          ${ts.length ? `<div class="terms">${ts.map(t => `<span class="term">${esc(t)}</span>`).join('')}</div>` : ''}</div>`; }).join('')}</div>`;
     document.querySelectorAll('#drawerBody .rclick[data-req]').forEach(el =>
       el.addEventListener('click', () => { const r = D.requirements.find(x => x.req_id === el.dataset.req); if (r) openDrawer(r); }));
     selReqId = null;
@@ -385,14 +397,14 @@
     if (drawerRuleChart) { drawerRuleChart.dispose(); drawerRuleChart = null; }
     openReq = null;
     const ov = D.set_level.overlaps || [];
-    document.getElementById('drawerBody').innerHTML = `
+    document.getElementById('drawerBody').innerHTML = `<div class="panel-scroll">
       <h3>Confirmed overlaps <span class="muted">(${ov.length})</span></h3>
       <div class="muted" style="font-size:12px;margin-bottom:8px">Requirement pairs judged to duplicate or substantially overlap.</div>
       ${ov.map(o => { const a = byId[o.a_id], b = byId[o.b_id]; return `
         <div class="cchar ovpair"><div class="top">
           <span class="name">${o.a_id} ~ ${o.b_id}</span><span class="sc">${o.score}</span></div>
           <div class="just">${a ? esc(a.text.slice(0, 96)) : o.a_id}</div>
-          <div class="just">${b ? esc(b.text.slice(0, 96)) : o.b_id}</div></div>`; }).join('')}`;
+          <div class="just">${b ? esc(b.text.slice(0, 96)) : o.b_id}</div></div>`; }).join('')}</div>`;
     selReqId = null;
     renderSugg(null);
     showDetail();
@@ -463,9 +475,8 @@
   });
   document.getElementById('ovBtn').addEventListener('click', openOverlaps);
   // Collapse/expand the chart row to give the bottom panels more height.
-  document.getElementById('chartsToggle').onclick = e => {
-    const collapsed = document.body.classList.toggle('charts-collapsed');
-    e.currentTarget.textContent = collapsed ? '▸' : '▾';
+  document.getElementById('chartsToggle').onclick = () => {
+    document.body.classList.toggle('charts-collapsed');   // CSS swaps the up/down-circle icon
     resizeCharts();
   };
   // The shared top nav (js/nav.js) owns the theme toggle; re-render on its event.
