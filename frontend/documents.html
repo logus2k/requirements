@@ -1,0 +1,117 @@
+<!-- Documents — project-scoped upload + list (projects mode). Uploading stages
+     material only; it triggers NO analysis. Quality / Coverage are explicit runs
+     (Run Quality lands in the next phase). -->
+<meta charset="utf-8">
+<title>Documents · reqoach</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<link rel="stylesheet" href="css/nav.css">
+<style>
+  :root{
+    --surface:#fcfcfb; --plane:#e9e9e9; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+    --accent:#2a78d6; --s1:#d03b3b; --s2:#ec835a; --s3:#fab219; --s4:#6bbf59; --s5:#0ca30c;
+    --panel2:rgba(11,11,11,.05);
+  }
+  html[data-theme="dark"]{
+    --surface:#1a1a19; --plane:#0d0d0d; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+    --accent:#3987e5; --panel2:rgba(255,255,255,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
+  header .runs{margin-left:auto;display:flex;gap:10px}
+  main{padding:22px;max-width:1000px;margin:0 auto}
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;
+    padding:9px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .btn:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--border)}
+  .btn.ghost:hover{border-color:var(--accent);filter:none}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+  .drop{border:2px dashed var(--border);border-radius:12px;padding:26px;text-align:center;
+    color:var(--muted);background:var(--surface);cursor:pointer;transition:border-color .12s,background .12s;margin-bottom:20px}
+  .drop.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 6%,var(--surface))}
+  .drop b{color:var(--ink)}
+  .drop input{display:none}
+  h3.sec{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
+  .doc{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);
+    border-radius:10px;padding:11px 14px;margin:8px 0}
+  .doc .fn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .doc .sz{margin-left:auto;color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .doc .ext{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--ink2);
+    background:var(--panel2);border-radius:5px;padding:1px 7px;text-transform:uppercase}
+  .none{color:var(--muted);padding:14px 2px;font-size:13.5px}
+  .hint{color:var(--muted);font-size:12px;margin-top:8px}
+</style>
+
+<header>
+  <div><h1 id="ptitle">Documents</h1></div>
+  <div class="runs">
+    <button class="btn" id="runQuality" disabled title="Runs the INCOSE quality analysis over this project's documents (next step)">▶ Run Quality</button>
+    <button class="btn ghost" id="runCoverage" disabled title="Runs the requirements-coverage analysis (coming soon)">▶ Run Coverage</button>
+  </div>
+</header>
+<main>
+  <label class="drop" id="drop">
+    <input id="file" type="file" multiple>
+    <div>Drop files here or <b>click to choose</b> — one or several at once.</div>
+    <div class="hint">Uploading stages documents only; it does not start any analysis.</div>
+  </label>
+  <h3 class="sec">Documents (<span id="count">0</span>)</h3>
+  <div id="list"><div class="none">Loading…</div></div>
+</main>
+
+<script src="js/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pid = new URLSearchParams(location.search).get('project') || (() => { try { return localStorage.getItem('reqoach-project'); } catch (e) { return null; } })();
+const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+
+if (!pid) { location.href = 'projects.html'; }
+
+function renderDocs(docs) {
+  $('count').textContent = docs.length;
+  $('runQuality').disabled = !docs.length;                    // enabled in the next phase's wiring
+  $('list').innerHTML = docs.length ? docs.map(d => `
+    <div class="doc"><span class="ext">${esc((d.ext || '').replace('.', ''))}</span>
+      <span class="fn">${esc(d.filename)}</span>
+      <span class="sz">${fmtSize(d.size || 0)}</span></div>`).join('')
+    : '<div class="none">No documents yet — add one or more above.</div>';
+}
+
+function loadProject() {
+  fetch('projects/' + encodeURIComponent(pid)).then(r => {
+    if (!r.ok) throw new Error('project'); return r.json();
+  }).then(p => {
+    $('ptitle').textContent = p.name || 'Documents';
+    document.title = (p.name || 'Documents') + ' · reqoach';
+    try { localStorage.setItem('reqoach-project', p.id); localStorage.setItem('reqoach-project-name', p.name || 'project'); } catch (e) {}
+    renderDocs(p.documents || []);
+  }).catch(() => { location.href = 'projects.html'; });
+}
+
+async function upload(files) {
+  if (!files || !files.length) return;
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  $('drop').classList.add('over');
+  try {
+    const res = await fetch('projects/' + encodeURIComponent(pid) + '/documents', { method: 'POST', body: fd }).then(r => r.json());
+    if (res.errors && res.errors.length) alert('Some files were skipped:\n' + res.errors.map(e => `${e.filename}: ${e.error}`).join('\n'));
+    loadProject();
+  } catch (e) { alert('Upload failed.'); }
+  finally { $('drop').classList.remove('over'); $('file').value = ''; }
+}
+
+$('file').addEventListener('change', e => upload(e.target.files));
+const drop = $('drop');
+['dragover', 'dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'dragend'].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove('over')));
+drop.addEventListener('drop', e => { e.preventDefault(); upload(e.dataTransfer.files); });
+
+loadProject();
+</script>

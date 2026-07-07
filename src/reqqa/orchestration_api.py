@@ -43,9 +43,10 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from reqqa import projects as pj
 from reqqa.assess import iter_assessment
 from reqqa.ingest.dispatch import SUPPORTED_EXTENSIONS
-from reqqa.jobs import JobOptions, iter_job
+from reqqa.jobs import JobOptions, iter_job, iter_project_job
 from reqqa.llm.client import AgentServerClient
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -63,11 +64,15 @@ class Job:
     progress: dict = field(default_factory=dict)   # {done, total} of the active stage
     error: str | None = None
     events: list[dict] = field(default_factory=list)
+    project_id: str | None = None   # set for project (multi-doc) runs
+    run_id: str | None = None       # == job_id for project runs
+    kind: str = "document"          # document | quality (project)
 
     def snapshot(self) -> dict:
         return {"job_id": self.job_id, "doc_id": self.doc_id,
                 "source_file": self.source_file, "status": self.status,
                 "stage": self.stage, "progress": self.progress, "error": self.error,
+                "project_id": self.project_id, "run_id": self.run_id, "kind": self.kind,
                 "event_count": len(self.events)}
 
 
@@ -128,6 +133,40 @@ class JobManager:
         job = Job(job_id=uuid.uuid4().hex, doc_id=doc_id, source_file=source_file)
         self.jobs[job.job_id] = job
         threading.Thread(target=self._run, args=(job, path, options),
+                         daemon=True).start()
+        return job
+
+    # --- project (multi-document) quality runs ---
+    def _run_project(self, job: Job, docs: list[dict], source_file: str,
+                     options: JobOptions) -> None:
+        job.status = "running"
+        self._emit(job, {"type": "stage", "stage": "queued", "status": "done"})
+        try:
+            for event in iter_project_job(docs, source_file, options=options):
+                self._emit(job, event)
+                if event.get("type") == "scorecard":
+                    self._persist_project_scorecard(job, event["data"])
+            job.status = "done"
+            self._emit(job, {"type": "job_done", "project_id": job.project_id, "run_id": job.run_id})
+        except Exception as e:  # noqa: BLE001
+            job.status = "error"
+            job.error = f"{type(e).__name__}: {e}"
+            self._emit(job, {"type": "job_error", "message": job.error})
+
+    def _persist_project_scorecard(self, job: Job, scorecard: dict) -> None:
+        meta = {"run_id": job.run_id, "project_id": job.project_id, "kind": "quality",
+                "finished_at": pj._now(), "source_file": job.source_file,
+                "total": scorecard.get("aggregates", {}).get("total"),
+                "produced_in_s": scorecard.get("produced_in_s"),
+                "documents": scorecard.get("documents", [])}
+        pj.save_quality_run(job.project_id, job.run_id, scorecard, meta)
+
+    def create_project_run(self, pid: str, docs: list[dict], source_file: str,
+                           options: JobOptions) -> Job:
+        job = Job(job_id=uuid.uuid4().hex, doc_id="", source_file=source_file)
+        job.project_id, job.run_id, job.kind = pid, job.job_id, "quality"
+        self.jobs[job.job_id] = job
+        threading.Thread(target=self._run_project, args=(job, docs, source_file, options),
                          daemon=True).start()
         return job
 
@@ -306,6 +345,89 @@ async def assess(sid, data):
         if _assess_gen.get(sid) != gen:
             return
         await sio.emit(event["type"], {**event, "gen": gen}, to=sid)
+
+
+# --- Projects mode (see specs/projects_mode/): project workspace + project-scoped
+# document upload. Uploading stores source + metadata ONLY — it triggers no analysis;
+# Quality/Coverage runs are explicit (later phases). ---
+
+@api.post("/projects")
+async def create_project(payload: dict | None = None) -> dict:
+    return pj.create_project((payload or {}).get("name", ""))
+
+
+@api.get("/projects")
+def list_projects() -> dict:
+    return {"projects": pj.list_projects()}
+
+
+@api.get("/projects/{pid}")
+def get_project(pid: str) -> dict:
+    proj = pj.get_project(pid)
+    if not proj:
+        raise HTTPException(404, "unknown project")
+    return proj
+
+
+@api.post("/projects/{pid}/documents")
+async def upload_project_documents(pid: str, files: list[UploadFile] = File(...)) -> JSONResponse:
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    saved, errors = [], []
+    for f in files:
+        fn = f.filename or "upload"
+        ext = os.path.splitext(fn)[1].lower()
+        if ext not in SUPPORTED_EXTENSIONS:
+            errors.append({"filename": fn, "error": f"unsupported extension {ext!r}"})
+            continue
+        saved.append(pj.add_document(pid, fn, ext, await f.read()))
+    return JSONResponse(status_code=201, content={"documents": saved, "errors": errors})
+
+
+@api.get("/projects/{pid}/documents")
+def list_project_documents(pid: str) -> dict:
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    return {"documents": pj.list_documents(pid)}
+
+
+@api.post("/projects/{pid}/quality:run")
+async def run_project_quality(pid: str, payload: dict | None = None) -> JSONResponse:
+    """Explicit, user-triggered INCOSE quality run over the project's documents
+    (all, or a `document_ids` subset). One scorecard; set-level across all docs;
+    each requirement traceable to its source document."""
+    proj = pj.get_project(pid)
+    if not proj:
+        raise HTTPException(404, "unknown project")
+    wanted = set((payload or {}).get("document_ids") or [])
+    docs = [d for d in pj.list_documents(pid) if not wanted or d["id"] in wanted]
+    run_docs = []
+    for d in docs:
+        path = pj.document_path(pid, d["id"])
+        if path:
+            run_docs.append({"path": path, "source_file": d["filename"], "document_id": d["id"]})
+    if not run_docs:
+        raise HTTPException(400, "no documents to analyze")
+    job = jm.create_project_run(pid, run_docs, proj.get("name") or "project", JobOptions())
+    return JSONResponse(status_code=202,
+                        content={"job_id": job.job_id, "run_id": job.run_id,
+                                 "project_id": pid, "status": job.status,
+                                 "document_count": len(run_docs)})
+
+
+@api.get("/projects/{pid}/quality")
+def project_quality_runs(pid: str) -> dict:
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    return {"runs": pj.list_quality_runs(pid)}
+
+
+@api.get("/projects/{pid}/quality/scorecard")
+def project_quality_scorecard(pid: str, run: str | None = None) -> dict:
+    sc = pj.get_quality_scorecard(pid, run)
+    if not sc:
+        raise HTTPException(404, "no quality scorecard yet (run not finished or none run)")
+    return sc
 
 
 # Serve the static frontend (dashboard, editor, vendored libs, existing data/)

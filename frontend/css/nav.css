@@ -12,8 +12,19 @@
 }
 .reqoach-nav .brand{
   font-weight:700; font-size:15px; letter-spacing:.01em; text-decoration:none;
-  color:var(--fg, var(--ink, #111)); margin-right:16px;
+  color:var(--fg, var(--ink, #111)); margin-right:14px;
 }
+.reqoach-nav .proj{
+  display:inline-flex; align-items:center; gap:6px; text-decoration:none;
+  color:var(--fg, var(--ink, #111)); font-size:13px; font-weight:600;
+  max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  padding:5px 11px; margin-right:14px; border-radius:8px;
+  border:1px solid var(--line, var(--border, rgba(128,128,128,.25)));
+  background:var(--panel2, rgba(128,128,128,.08));
+}
+.reqoach-nav .proj::before{ content:"▸ "; color:var(--mut, var(--muted, #888)); }
+.reqoach-nav .proj:hover{ border-color:var(--accent, var(--acc, #6096e5)); }
+.reqoach-nav .proj.none{ color:var(--mut, var(--muted, #888)); font-weight:500; font-style:italic; }
 .reqoach-nav a.item{
   color:var(--mut, var(--muted, #777)); text-decoration:none;
   padding:8px 13px; border-radius:8px; font-size:13.5px; white-space:nowrap;

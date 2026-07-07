@@ -1,0 +1,137 @@
+"""Project workspace storage (projects mode) — see specs/projects_mode/.
+
+Greenfield, filesystem-backed. A Project owns 1..n uploaded Documents; uploading
+a document only stores its source + metadata — it triggers NO analysis. Quality
+and Coverage runs are explicit (later phases) and write under the project.
+
+Layout (REQQA_STORE, default <repo>/store):
+  store/projects/<project_id>/
+    meta.json                       # {id, name, created_at, documents:[doc-meta...]}
+    documents/<document_id>/
+      source.<ext>
+      meta.json                     # {id, project_id, filename, ext, ingested_at, size}
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+import os
+import uuid
+
+_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+STORE = os.environ.get("REQQA_STORE", os.path.join(_REPO, "store"))
+PROJECTS_DIR = os.path.join(STORE, "projects")
+
+
+def _now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def _project_dir(pid: str) -> str:
+    return os.path.join(PROJECTS_DIR, pid)
+
+
+def _read_json(path: str) -> dict | None:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _write_json(path: str, data: dict) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)                       # atomic within a dir
+
+
+# ---- projects ----
+
+def create_project(name: str) -> dict:
+    pid = uuid.uuid4().hex
+    meta = {"id": pid, "name": (name or "").strip() or "Untitled project",
+            "created_at": _now(), "documents": []}
+    os.makedirs(os.path.join(_project_dir(pid), "documents"), exist_ok=True)
+    _write_json(os.path.join(_project_dir(pid), "meta.json"), meta)
+    return meta
+
+
+def list_projects() -> list[dict]:
+    out: list[dict] = []
+    if os.path.isdir(PROJECTS_DIR):
+        for pid in os.listdir(PROJECTS_DIR):
+            m = _read_json(os.path.join(_project_dir(pid), "meta.json"))
+            if m:
+                out.append({**m, "document_count": len(m.get("documents", []))})
+    out.sort(key=lambda p: p.get("created_at", ""), reverse=True)
+    return out
+
+
+def get_project(pid: str) -> dict | None:
+    return _read_json(os.path.join(_project_dir(pid), "meta.json"))
+
+
+# ---- documents ----
+
+def add_document(pid: str, filename: str, ext: str, data: bytes) -> dict | None:
+    proj = get_project(pid)
+    if not proj:
+        return None
+    did = uuid.uuid4().hex
+    ddir = os.path.join(_project_dir(pid), "documents", did)
+    os.makedirs(ddir, exist_ok=True)
+    with open(os.path.join(ddir, f"source{ext}"), "wb") as f:
+        f.write(data)
+    dmeta = {"id": did, "project_id": pid, "filename": filename, "ext": ext,
+             "ingested_at": _now(), "size": len(data)}
+    _write_json(os.path.join(ddir, "meta.json"), dmeta)
+    proj.setdefault("documents", []).append(dmeta)
+    _write_json(os.path.join(_project_dir(pid), "meta.json"), proj)
+    return dmeta
+
+
+def list_documents(pid: str) -> list[dict]:
+    proj = get_project(pid)
+    return proj.get("documents", []) if proj else []
+
+
+def document_path(pid: str, did: str) -> str | None:
+    ddir = os.path.join(_project_dir(pid), "documents", did)
+    dmeta = _read_json(os.path.join(ddir, "meta.json"))
+    if not dmeta:
+        return None
+    return os.path.join(ddir, f"source{dmeta['ext']}")
+
+
+# ---- quality runs (explicit; written under the project) ----
+
+def _quality_dir(pid: str, run_id: str) -> str:
+    return os.path.join(_project_dir(pid), "quality", run_id)
+
+
+def save_quality_run(pid: str, run_id: str, scorecard: dict, meta: dict) -> None:
+    _write_json(os.path.join(_quality_dir(pid, run_id), "scorecard.json"), scorecard)
+    _write_json(os.path.join(_quality_dir(pid, run_id), "meta.json"), meta)
+    proj = get_project(pid)
+    if proj is not None:
+        runs = [r for r in proj.get("quality_runs", []) if r.get("run_id") != run_id]
+        runs.append(meta)
+        proj["quality_runs"] = runs
+        _write_json(os.path.join(_project_dir(pid), "meta.json"), proj)
+
+
+def list_quality_runs(pid: str) -> list[dict]:
+    proj = get_project(pid)
+    return proj.get("quality_runs", []) if proj else []
+
+
+def get_quality_scorecard(pid: str, run_id: str | None = None) -> dict | None:
+    runs = list_quality_runs(pid)
+    if run_id is None:
+        if not runs:
+            return None
+        run_id = sorted(runs, key=lambda r: r.get("finished_at") or "")[-1]["run_id"]
+    return _read_json(os.path.join(_quality_dir(pid, run_id), "scorecard.json"))

@@ -1,0 +1,95 @@
+<!-- Projects — landing / switcher (projects mode, see specs/projects_mode/). Create a
+     project or open an existing one; selecting a project stores it as the current
+     project (localStorage) and opens its Documents view. -->
+<meta charset="utf-8">
+<title>Projects · reqoach</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<link rel="stylesheet" href="css/nav.css">
+<style>
+  :root{
+    --surface:#fcfcfb; --plane:#e9e9e9; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+    --accent:#2a78d6; --s1:#d03b3b; --s2:#ec835a; --s3:#fab219; --s4:#6bbf59; --s5:#0ca30c;
+    --panel2:rgba(11,11,11,.05);
+  }
+  html[data-theme="dark"]{
+    --surface:#1a1a19; --plane:#0d0d0d; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+    --accent:#3987e5; --panel2:rgba(255,255,255,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
+  main{padding:22px;max-width:1000px;margin:0 auto}
+  .new{display:flex;gap:10px;margin-bottom:22px;max-width:560px}
+  .new input{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:9px;
+    padding:10px 13px;color:var(--ink);font:inherit;font-size:14px;outline:none}
+  .new input:focus{border-color:var(--accent)}
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;
+    padding:10px 16px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .btn:hover{filter:brightness(1.06)} .btn:disabled{opacity:.5;cursor:default;filter:none}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;
+    cursor:pointer;transition:border-color .12s,box-shadow .12s;text-decoration:none;color:inherit;display:block}
+  .card:hover{border-color:var(--accent);box-shadow:0 4px 16px rgba(0,0,0,.10)}
+  .card h2{font-size:15px;margin:0 0 6px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card .meta{color:var(--muted);font-size:12.5px}
+  .card .count{display:inline-block;margin-top:10px;font-size:12px;color:var(--ink2);
+    background:var(--panel2);border-radius:20px;padding:2px 10px}
+  .none{color:var(--muted);padding:24px 2px;font-size:13.5px}
+</style>
+
+<header><div><h1>Projects</h1></div></header>
+<main>
+  <div class="new">
+    <input id="name" type="text" placeholder="New project name — e.g. &quot;Payments Platform&quot;" autocomplete="off">
+    <button class="btn" id="create">Create project</button>
+  </div>
+  <div class="grid" id="grid"></div>
+</main>
+
+<script src="js/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtDate = iso => { const d = iso ? iso.slice(0, 10) : ''; return d; };
+
+function openProject(p) {
+  try { localStorage.setItem('reqoach-project', p.id); localStorage.setItem('reqoach-project-name', p.name || 'project'); } catch (e) {}
+  location.href = 'documents.html?project=' + encodeURIComponent(p.id);
+}
+
+function render(projects) {
+  const g = $('grid');
+  if (!projects.length) { g.innerHTML = '<div class="none">No projects yet. Create one above to get started.</div>'; return; }
+  g.innerHTML = projects.map(p => `
+    <a class="card" href="documents.html?project=${encodeURIComponent(p.id)}" data-id="${esc(p.id)}" data-name="${esc(p.name)}">
+      <h2>${esc(p.name)}</h2>
+      <div class="meta">Created ${esc(fmtDate(p.created_at))}</div>
+      <span class="count">${p.document_count || 0} document${(p.document_count || 0) !== 1 ? 's' : ''}</span>
+    </a>`).join('');
+  g.querySelectorAll('.card').forEach(el => el.addEventListener('click', e => {
+    e.preventDefault(); openProject({ id: el.dataset.id, name: el.dataset.name });
+  }));
+}
+
+function load() {
+  fetch('projects').then(r => r.json()).then(d => render(d.projects || [])).catch(() => render([]));
+}
+
+async function create() {
+  const name = $('name').value.trim();
+  $('create').disabled = true;
+  try {
+    const p = await fetch('projects', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }) }).then(r => r.json());
+    openProject(p);
+  } catch (e) { $('create').disabled = false; alert('Could not create project.'); }
+}
+$('create').addEventListener('click', create);
+$('name').addEventListener('keydown', e => { if (e.key === 'Enter') create(); });
+load();
+</script>

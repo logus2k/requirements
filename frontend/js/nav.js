@@ -1,30 +1,37 @@
-/* Shared top nav for every reqoach page. Injects a consistent menu bar (brand +
- * page links + theme toggle), highlights the current page, and owns the theme:
- * it flips `data-theme`, persists to localStorage ("reqoach-theme"), and both
- * calls window.reqoachRedraw() (charts that read CSS vars) and dispatches a
- * "reqoach:theme" event (so pages can re-render on their own).
+/* Shared top nav for every reqoach page. Projects mode: brand → Projects, a
+ * current-project chip (switcher), then the project-scoped pages. Owns the theme
+ * (flips `data-theme`, persists to localStorage, calls window.reqoachRedraw() and
+ * dispatches "reqoach:theme"). Theme is initialised before this runs by a one-line
+ * inline <head> script, so there's no flash.
  *
- * Theme is initialized *before* this runs by a one-line inline script in each
- * page's <head>, so there's no flash and charts render in the right theme.
- *
- * Monitor is intentionally not a top-level link — it is per-job (needs ?job=)
- * and is reached from the ingestion flow. */
+ * Current project lives in localStorage: reqoach-project (id) + reqoach-project-name.
+ * Project-scoped links carry ?project=<id> so a page always knows its project. */
 (function () {
   "use strict";
+  const ls = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  const pid = ls("reqoach-project");
+  const pname = ls("reqoach-project-name");
+  const q = pid ? "?project=" + encodeURIComponent(pid) : "";
+
+  // Project-scoped pages carry the current project; Live editor is project-independent.
   const PAGES = [
-    { href: "index.html",    label: "Dashboard" },
-    { href: "overlaps.html", label: "Overlaps" },
-    { href: "ingest.html",   label: "Assess a document" },
-    { href: "editor.html",   label: "Live editor" },
+    { href: "documents.html" + q, label: "Documents",           match: "documents.html" },
+    { href: "index.html" + q,     label: "Requirements Quality", match: "index.html" },
+    { href: "editor.html",        label: "Live editor",          match: "editor.html" },
   ];
   const cur = location.pathname.split("/").pop() || "index.html";
 
   const nav = document.createElement("nav");
   nav.className = "reqoach-nav";
   nav.innerHTML =
-    '<a class="brand" href="index.html">reqoach</a>' +
+    '<a class="brand" href="projects.html">reqoach</a>' +
+    `<a class="proj${pid ? "" : " none"}" href="projects.html" title="Switch / manage projects">` +
+      (pid ? esc(pname || "project") : "Select project…") + "</a>" +
     PAGES.map(p =>
-      `<a class="item${p.href === cur ? " active" : ""}" href="${p.href}">${p.label}</a>`
+      `<a class="item${p.match === cur ? " active" : ""}" href="${p.href}">${p.label}</a>`
     ).join("") +
     '<span class="spacer"></span>' +
     '<button class="tbtn" id="reqoach-theme" title="Toggle light / dark">◐ Theme</button>';
