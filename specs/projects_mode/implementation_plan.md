@@ -64,66 +64,65 @@ Overlaps + Set-level are tabs; each requirement shows its source document. Verif
 
 ---
 
-## Phase 3 — Project-Type catalog + Problem Framing (reference plumbing)
+## Phase 3 — Catalog + Problem Framing (reference plumbing) — compose model
 
-Build the reference the Coverage math will consume. Still no coverage verdict yet.
+Build the reference the Coverage engine consumes. Still no coverage verdict yet.
 
 **Backend**
-- Seed **ProjectType catalog** (`catalog/project_types/*.json`) with a handful of archetypes
-  (e.g., web-app, ML-service, data-pipeline, embedded/edge, internal-tool) — each with
-  `matching_signals`, `expected_taxonomy`, `standard_packs`, `typical_capabilities`,
-  `thresholds`. `GET /project-types`.
-- Seed **standard packs** (`catalog/standards/*.json`): ISO 25010:2023 (+Safety), 29148:2018
-  set-characteristics, Volere types, and the reconciled URCF starter; stubs for 25019 /
-  ASVS / WCAG.
-- **Problem Framing** stage (Collect→Synthesize→Grade→Ratify):
-  `POST /projects/{pid}/problem-statement:generate` (streamed draft with provenance grades +
-  clarifying questions), `PUT …/problem-statement` (save ratified/edited),
-  `GET/PUT …/coverage-profile` (matched types + human overrides).
-- Adaptive elaboration + circularity guard per §4.
+- **Catalog — BUILT (2026-07-08)** at `catalog/`: `domains.json` (16 coverage domains),
+  `project_types/*.json` (20 archetypes as system-type × domain knowledge), `standards/*.json`
+  (6 packs). See `catalog/README.md`. Add `GET /catalog/{domains,archetypes,standards}`.
+- **Problem-Framing agent — BUILT (2026-07-08)** as the `problem_framing` preset on
+  agent_server (structured, provenance-graded Problem Statement + `candidate_archetypes` +
+  clarifying questions; adaptive extract-vs-elaborate; verified on rich + one-sentence input).
+  Remaining: `reqqa` integration (gather project doc text → call preset), endpoints
+  `POST /projects/{pid}/problem-statement:generate`, `PUT …/problem-statement`,
+  `GET/PUT …/coverage-profile` (candidate archetypes + overrides), persistence + versioning.
 
 **Frontend**
-- **Requirements Coverage** page, tabs `[ Problem Statement | Profile | … ]` (Matrix/Gaps
-  arrive in Phase 4/5).
+- **Requirements Coverage** page, tabs `[ Problem Statement | Profile | … ]`.
 - **Problem Statement** tab: structured, editable fields with provenance badges
   (stated/inferred/assumed + confidence), clarifying-question list, "Ratify" action.
-- **Profile** tab: matched ProjectType(s), the active expected leaves & standard packs,
-  editable (add/remove types, mark leaves N/A, adjust thresholds). Versioned.
+- **Profile** tab: the candidate archetypes (with confidence) + active standard packs,
+  editable (add/remove archetypes, mark domains N/A, adjust emphasis). Versioned.
 
-**Done when:** Run Coverage (or a "Frame problem" action) drafts a structured, provenance-
-graded Problem Statement + a matched, editable Profile; human can edit and ratify; both
-persist and version. Verified headless (thin input → assumptions flagged; rich input →
-extraction-heavy).
+**Done when:** Frame-problem drafts a structured, provenance-graded Problem Statement +
+editable Profile; human edits/ratifies; both persist and version. Verified (thin → assumptions
+flagged; rich → extraction-heavy) — the preset already demonstrates this.
 
 ---
 
-## Phase 4 — Coverage Layer A (taxonomy coverage + heatmap)
+## Phase 4 — Domain-judge panel (the coverage engine)
 
-First real coverage verdict — category-level blind spots.
+The real coverage verdict — a fan-out of ~16 domain-expert judges (one per `domains.json`
+domain), the set-level analog of the C1–C9 judges.
 
 **Backend**
-- Requirement **tagging** (faceted, multi-label) against the active Profile's taxonomy, each
-  tag carrying its **grounding** standard. Persist on requirements + aggregate.
-- Coverage computation Layer A → `coverage.json` `matrix[]` + category `gaps[]`.
+- One coverage judge per domain (agent_server presets), run in parallel over the project's
+  requirement set + Problem Statement. Each: **decompose** input in its domain → **consult**
+  the domain's slice of the relevant archetypes (weighted by `candidate_archetypes`) + the
+  domain's standard-pack leaves → emit domain **coverage + gaps + questions + enrichments**,
+  each with **grounding**. Then a **synthesis/dedup** pass across judges.
+- `POST /projects/{pid}/coverage:run` (streamed, per-domain progress) → `coverage.json`.
 
 **Frontend**
-- **Coverage Matrix** tab: heatmap (domains × sub-characteristics; cell = count + status),
-  grounding legend, click-through to the covering/absent requirements.
-- Honest metrics: covered/expected leaves + open items — **no "coverage %."**
+- **Coverage** tab: domain heatmap (16 domains × status), grounding legend, click-through to
+  covering/absent requirements. Honest metrics: covered/expected + open items — **no "%."**
 
-**Done when:** a project's requirements are tagged and the matrix shows thin/empty expected
-leaves as gaps, each with its grounding standard. Verified headless.
+**Done when:** a coverage run produces per-domain coverage + a deduped, grounded gap/question
+list. Verified with a real run.
 
 ---
 
-## Phase 5 — Coverage Layer B (goal / obstacle analysis → gaps & questions)
+## Phase 5 — Synthesis, obstacle depth & problem-statement enrichment
 
-The differentiator — "are they *enough for the problem*."
+Deepen the panel's output.
 
 **Backend**
-- From the Problem Statement capabilities, derive a lightweight goal tree; run **obstacle
-  analysis** per goal; emit candidate missing requirements + questions with severity +
-  grounding + `addressed_capability`. Merge into `coverage.json` `gaps[]` / `questions[]`.
+- Goal/**obstacle analysis** per capability folded into the relevant domain judges (unmitigated
+  obstacle → candidate missing requirement + question). Judges also **enrich the Problem
+  Statement** (domain concerns the user never stated) — the one-sentence-input build-out.
+- Synthesis prioritizes by severity, resolves cross-domain overlap, sets overall confidence.
 
 **Frontend**
 - **Gaps & Questions** tab: criticality-colored list (reusing `--s1..--s5`), grouped by
@@ -139,7 +138,7 @@ failure mode Y" items a linter could never produce. Verified headless.
 
 - **Layer C** (within-requirement completeness: EARS unwanted-behavior, QA scenarios, smells).
 - **Layer D** (traceability completeness) when goal→feature→req hierarchies exist.
-- Expand standard packs (25019, full ASVS/WCAG/GDPR); UI editor for the ProjectType catalog.
+- Expand standard packs (25019, full ASVS/WCAG/GDPR); UI editor for the archetype catalog.
 - **Re-import** legacy single-doc scorecards into a project.
 - Change-awareness: re-run coverage after edits with a **diff vs the last run**.
 

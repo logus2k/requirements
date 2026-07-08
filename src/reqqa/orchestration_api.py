@@ -43,6 +43,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from reqqa import framing
 from reqqa import projects as pj
 from reqqa.assess import iter_assessment
 from reqqa.ingest.dispatch import SUPPORTED_EXTENSIONS
@@ -428,6 +429,79 @@ def project_quality_scorecard(pid: str, run: str | None = None) -> dict:
     if not sc:
         raise HTTPException(404, "no quality scorecard yet (run not finished or none run)")
     return sc
+
+
+# --- Requirements Coverage — Problem Framing (stage 0). Explicit, user-triggered. ---
+
+@api.post("/projects/{pid}/problem-statement:generate")
+def generate_problem_statement(pid: str, payload: dict | None = None) -> dict:
+    """Distil a structured, provenance-graded problem statement from the project's
+    documents (+ optional free-text request). Sync `def` → runs in the threadpool so
+    the ~20s LLM call doesn't block the event loop. Saved as an unratified draft."""
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    paths = [p for d in pj.list_documents(pid) if (p := pj.document_path(pid, d["id"]))]
+    try:
+        statement = framing.frame_problem(paths, (payload or {}).get("user_request", ""))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"framing failed: {type(e).__name__}: {e}")
+    doc = pj.save_problem_statement(pid, statement, ratified=False)
+    if not pj.get_coverage_profile(pid):        # seed the profile from the framing output
+        pj.save_coverage_profile(pid, {"archetypes": statement.get("candidate_archetypes", []),
+                                       "salient_domains": statement.get("salient_domains", []),
+                                       "domain_overrides": {}})
+    return doc
+
+
+@api.get("/projects/{pid}/problem-statement")
+def get_problem_statement(pid: str) -> dict:
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    return pj.get_problem_statement(pid) or {"version": 0, "statement": None}
+
+
+@api.put("/projects/{pid}/problem-statement")
+async def put_problem_statement(pid: str, payload: dict) -> dict:
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    st = (payload or {}).get("statement")
+    if st is None:
+        raise HTTPException(400, "missing 'statement'")
+    return pj.save_problem_statement(pid, st, ratified=bool((payload or {}).get("ratified", False)))
+
+
+@api.get("/projects/{pid}/coverage-profile")
+def get_coverage_profile(pid: str) -> dict:
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    return pj.get_coverage_profile(pid) or {"version": 0, "profile": None}
+
+
+@api.put("/projects/{pid}/coverage-profile")
+async def put_coverage_profile(pid: str, payload: dict) -> dict:
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    prof = (payload or {}).get("profile")
+    if prof is None:
+        raise HTTPException(400, "missing 'profile'")
+    return pj.save_coverage_profile(pid, prof)
+
+
+# --- Coverage catalog (read-only, for the UI) ---
+
+@api.get("/catalog/domains")
+def catalog_domains() -> dict:
+    return framing.load_domains()
+
+
+@api.get("/catalog/archetypes")
+def catalog_archetypes() -> dict:
+    return {"archetypes": framing.load_archetypes()}
+
+
+@api.get("/catalog/standards")
+def catalog_standards() -> dict:
+    return {"standards": framing.load_standards()}
 
 
 # Serve the static frontend (dashboard, editor, vendored libs, existing data/)

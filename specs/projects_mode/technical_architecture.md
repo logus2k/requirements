@@ -33,21 +33,28 @@ Two consequences drive the whole design:
 
 ## 2. Domain model
 
+> **BUILT (2026-07-08):** the catalog exists on disk at `catalog/` (bind-mounted like
+> `store/`): `domains.json` (16 coverage domains), `project_types/*.json` (20 archetypes),
+> `standards/*.json` (6 packs). See `catalog/README.md`. The model below reflects the
+> **compose** design (archetype = per-domain knowledge, not a match label).
+
 ```
-ProjectType            (catalog / archetype — REUSABLE across projects)
-  id, name, description
-  matching_signals[]        # keywords / phrases / heuristics used to match a problem statement
-  expected_taxonomy[]       # coverage leaves this type normally requires (facet+leaf refs)
-  standard_packs[]          # reference packs switched on for this type (see §6)
-  typical_capabilities[]    # goal/capability seeds used by obstacle analysis
-  thresholds{}              # per-leaf "expected depth" (min # of reqs, or presence-only)
-  version, updated_at
+Domain                 (catalog/domains.json — 16 fixed coverage domains; one judge each)
+  id, name, standards[], concerns[], questions[]     # the generic baseline per domain
+
+Archetype              (catalog/project_types/*.json — REUSABLE domain KNOWLEDGE, not a label)
+  id, name, class, aliases[], summary, matching_signals[], salient_domains[], grounding[]
+  domains{ <domain-id>: { emphasis, concerns[], typical_requirements[], questions[] } }
+  # a system-type × domain matrix; composed (not matched) — judges pull relevant slices
+
+StandardPack           (catalog/standards/*.json)
+  id, name, source, leaves[{ id, name, domain, description, signals[] }]
 
 Project                (a concrete engagement — the new top-level entity)
   id, name, created_at
   documents[]               # 1..n uploaded docs
   problem_statement@ver     # §4 (versioned, human-ratified)
-  coverage_profile@ver      # resolved reference = matched ProjectType(s) + human overrides
+  coverage_profile@ver      # candidate archetypes (w/ confidence) + human overrides
   quality_runs[]            # explicit Quality analyses (history)
   coverage_runs[]           # explicit Coverage analyses (history)
 
@@ -64,9 +71,11 @@ Requirement            (produced by segmentation; the atom both analyses share)
 **Key relationships**
 - A **Project** owns many **Documents**; requirements are gathered across *all* of them
   and each requirement is traceable to its `source_document_id` (a tag — §5).
-- A **ProjectType** is a reusable archetype in a catalog; a **Project** is a concrete
-  instance whose **Problem Statement** is *matched* to one or more ProjectTypes to
-  instantiate the **Coverage Profile** (the active expected-coverage reference).
+- An **Archetype** is reusable per-domain knowledge in the catalog. A **Project** is not
+  *matched* to one — the Problem-Framing agent proposes **candidate archetypes with
+  confidence** (a project is naturally hybrid), which *weight* how the domain judges
+  **compose** knowledge from several archetypes. The human-editable **Coverage Profile**
+  records those candidates + overrides.
 - **Quality run** and **Coverage run** are explicit, versioned jobs. Uploading documents
   triggers **neither**.
 
@@ -92,7 +101,7 @@ store/projects/<project_id>/
     coverage.json                # §7 output (matrix, gaps, questions, grounding)
     meta.json
 
-catalog/project_types/<type_id>.json   # the ProjectType catalog (seeded, grows over time)
+catalog/project_types/<id>.json        # the archetype catalog (BUILT — 20 archetypes)
 catalog/standards/<pack_id>.json       # reference packs (§6)
 ```
 
@@ -144,35 +153,42 @@ themselves*, grading those reqs against it is partly circular. Mitigations, all 
 ratification injects outside judgment. When the statement is ~entirely inferred, Coverage
 **lowers its confidence** rather than presenting a confident gap list.
 
-### Stage 1 — Project-Type matching → Coverage Profile
+### Stage 1 — Archetype relevance (compose, don't match)
 
-Match the Problem Statement (+ doc signals) against the **ProjectType catalog**
-(`matching_signals`, embeddings). Select one or more types (a project may be transversal),
-union their `expected_taxonomy` / `standard_packs` / `typical_capabilities` / `thresholds`,
-apply human overrides → the **Coverage Profile** (the resolved, editable active reference).
-Human can add/remove types, toggle leaves N/A, and adjust thresholds; versioned.
+> **Architecture change (2026-07-08): compose, not match.** Archetypes are domain
+> *knowledge*, not labels. We do NOT force the project into N discrete types and union a
+> checklist. Instead the Problem-Framing agent proposes **candidate archetypes with
+> confidence** (a project is naturally hybrid — see the `candidate_archetypes` field), and
+> that becomes *relevance weighting* over the catalog, not a hard filter. Each domain judge
+> (Stage 3) pulls the relevant per-domain slices from several archetypes. The human can
+> still add/remove archetypes and mark domains N/A; versioned as the **Coverage Profile**.
 
 ### Stage 2 — Requirement tagging  (faceted, multi-label)
 
 For every requirement across all project docs, assign **multi-label tags** (§5) —
-quality-characteristic, NFR-type, capability/goal, **standard grounding**, and
-**source-document**. A transversal requirement carries several tags across facets. No
-forced 1:1 classification.
+coverage-domain, NFR-type, capability/goal, **standard grounding**, and **source-document**.
+A transversal requirement carries several tags across facets. No forced 1:1 classification.
 
-### Stage 3 — Coverage computation
+### Stage 3 — Domain-judge panel (the coverage engine)
 
-- **Layer A — Taxonomy coverage.** For each expected leaf in the Coverage Profile, count
-  requirements carrying its tag; leaves below threshold (often 0) become **category gaps**.
-- **Layer B — Goal / obstacle analysis (the differentiator).** From the Problem Statement's
-  capabilities, build a lightweight goal tree; for each goal enumerate **obstacles** (ways
-  it fails); each unmitigated obstacle → a **candidate missing requirement** + a pointed
-  question. Answers "are they *enough for this problem*."
-- **Layer C — Within-requirement completeness** *(later).* Per functional requirement, check
-  expected companions exist (error/exception behavior, quality constraints, acceptance
-  criteria, preconditions). Tools: EARS "unwanted behavior" clauses, Quality-Attribute
-  Scenarios, requirement smells.
-- **Layer D — Traceability completeness** *(later, when a hierarchy exists).* Orphans /
-  childless parents across goal→feature→requirement links.
+A **panel of ~16 specialized coverage judges — one per domain** (`catalog/domains.json`) —
+the set-level analog of the per-requirement INCOSE C1–C9 judge fan-out. Each judge, in
+parallel, for its domain:
+1. **Decomposes** the input — what the requirement set actually *says* in this domain
+   (grounds first, so it doesn't flood the user with generic best-practice).
+2. **Consults archetype knowledge** — the domain's slice of the relevant archetypes
+   (`catalog/project_types/*` weighted by Stage-1 relevance) + the domain's standard-pack
+   leaves.
+3. **Emits** (a) domain **coverage** (which expected concerns are addressed vs missing),
+   (b) **gaps + pointed questions** with grounding, and (c) **enrichments** to the problem
+   statement (domain concerns the user never stated — this is how a one-sentence brief gets
+   built out).
+Then a **synthesis/dedup pass** (like the existing reviewer step) merges overlapping /
+contradictory candidates across judges, resolves cross-domain overlap, prioritizes by
+severity, and keeps the **questions + confidence, human-ratified** contract.
+
+- **Later:** within-requirement completeness (EARS unwanted-behavior, QA scenarios, smells)
+  and traceability completeness (orphans / childless parents) layer on as extra judges.
 
 ### Output shape (`coverage.json`)
 
@@ -300,5 +316,5 @@ event is unchanged.
 
 - Automatic acceptance of inferred problem statements (always human-ratified).
 - Coverage Layers C/D (within-req completeness, traceability) — after A/B prove out.
-- Editing the ProjectType catalog via UI (seeded via files first).
+- Editing the archetype catalog via UI (authored via files first).
 - Re-import of legacy single-doc scorecards into projects (a later utility).

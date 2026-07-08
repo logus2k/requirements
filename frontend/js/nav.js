@@ -18,9 +18,10 @@
 
   // Project-scoped pages carry the current project; Live editor is project-independent.
   const PAGES = [
-    { href: "documents.html" + q, label: "Documents",           match: "documents.html" },
-    { href: "index.html" + q,     label: "Requirements Quality", match: "index.html" },
-    { href: "editor.html",        label: "Live editor",          match: "editor.html" },
+    { href: "documents.html" + q, label: "Documents",            match: "documents.html" },
+    { href: "index.html" + q,     label: "Requirements Quality",  match: "index.html" },
+    { href: "coverage.html" + q,  label: "Requirements Coverage", match: "coverage.html" },
+    { href: "editor.html",        label: "Live editor",           match: "editor.html" },
   ];
   const cur = location.pathname.split("/").pop() || "index.html";
 

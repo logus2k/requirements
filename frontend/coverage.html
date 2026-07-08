@@ -1,0 +1,195 @@
+<!-- Requirements Coverage (projects mode) — Problem Statement + Profile tabs. Stage 0
+     of coverage: frame the problem (structured, provenance-graded), edit, ratify; and
+     the derived Profile (candidate archetypes + salient domains) that will weight the
+     domain-judge panel. The coverage verdict (domain judges) comes in a later phase. -->
+<meta charset="utf-8">
+<title>Coverage · reqoach</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<link rel="stylesheet" href="css/nav.css">
+<style>
+  :root{--surface:#fcfcfb;--plane:#e9e9e9;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
+    --grid:#e1e0d9;--border:rgba(11,11,11,.10);--accent:#2a78d6;
+    --s1:#d03b3b;--s2:#ec835a;--s3:#fab219;--s4:#6bbf59;--s5:#0ca30c;--panel2:rgba(11,11,11,.05)}
+  html[data-theme="dark"]{--surface:#1a1a19;--plane:#0d0d0d;--ink:#fff;--ink2:#c3c2b7;--muted:#898781;
+    --grid:#2c2c2a;--border:rgba(255,255,255,.10);--accent:#3987e5;--panel2:rgba(255,255,255,.06)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
+  header .status{margin-left:auto;color:var(--muted);font-size:12.5px}
+  .tabbar{display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--border);background:var(--surface)}
+  .tabbtn{background:none;border:none;padding:11px 15px;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;
+    cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabbtn:hover{color:var(--ink)} .tabbtn.active{color:var(--ink);border-bottom-color:var(--accent)}
+  main{padding:20px 22px 60px;max-width:980px;margin:0 auto}
+  .pane[hidden]{display:none}
+  .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;padding:9px 15px;
+    font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .btn:hover{filter:brightness(1.06)} .btn:disabled{opacity:.5;cursor:default;filter:none}
+  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--border)} .btn.ghost:hover{border-color:var(--accent);filter:none}
+  .req{flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:9px 12px;color:var(--ink);font:inherit;font-size:13.5px;outline:none}
+  .req:focus{border-color:var(--accent)}
+  .conf{border-radius:20px;padding:3px 11px;font-size:12px;font-weight:600;color:#fff}
+  .field{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:13px 15px;margin:12px 0}
+  .field h3{margin:0 0 3px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:8px}
+  .prov{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#fff;border-radius:4px;padding:1px 6px}
+  .field textarea{width:100%;background:transparent;border:1px solid var(--border);border-radius:8px;padding:8px 10px;
+    color:var(--ink);font:inherit;font-size:13.5px;resize:vertical;min-height:38px;outline:none}
+  .field textarea:focus{border-color:var(--accent)}
+  .hint{color:var(--muted);font-size:11.5px;margin-top:4px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .ask{background:color-mix(in srgb,var(--s3) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--s3) 40%,var(--border))}
+  .ask li{margin:4px 0} .rd li{margin:3px 0;color:var(--ink2)}
+  .empty{color:var(--muted);padding:30px 2px;font-size:14px}
+  .chip{display:inline-flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:20px;padding:4px 6px 4px 12px;margin:4px 6px 4px 0;font-size:13px}
+  .chip b{font-weight:600} .chip .x{cursor:pointer;color:var(--muted);border:none;background:none;font-size:15px;line-height:1;padding:0 4px}
+  .chip .x:hover{color:var(--s1)}
+  select.add{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--ink);font:inherit;font-size:13px;margin-top:8px}
+</style>
+
+<header>
+  <div><h1 id="ptitle">Requirements Coverage</h1></div>
+  <div class="status" id="status"></div>
+</header>
+<div class="tabbar">
+  <button class="tabbtn active" data-tab="statement">Problem Statement</button>
+  <button class="tabbtn" data-tab="profile">Profile</button>
+</div>
+<main>
+  <div class="pane" id="pane-statement"></div>
+  <div class="pane" id="pane-profile" hidden></div>
+</main>
+
+<script src="js/nav.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const pid=new URLSearchParams(location.search).get('project')||(()=>{try{return localStorage.getItem('reqoach-project')}catch(e){return null}})();
+if(!pid) location.href='projects.html';
+let ST=null, PROFILE=null, ARCHE={}, DOMS={};
+const provColor=p=>p==='stated'?cssVar('--s5'):p==='inferred'?cssVar('--s3'):cssVar('--s2');
+const confColor=c=>c==='high'?cssVar('--s4'):c==='medium'?cssVar('--s3'):cssVar('--s2');
+
+// ---- tabs ----
+document.querySelectorAll('.tabbtn').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.tabbtn').forEach(x=>x.classList.toggle('active',x===b));
+  $('pane-statement').hidden=b.dataset.tab!=='statement';
+  $('pane-profile').hidden=b.dataset.tab!=='profile';
+}));
+
+// ---- boot ----
+Promise.all([
+  fetch('catalog/archetypes').then(r=>r.json()).then(d=>{(d.archetypes||[]).forEach(a=>ARCHE[a.id]=a.name)}).catch(()=>{}),
+  fetch('catalog/domains').then(r=>r.json()).then(d=>{(d.domains||[]).forEach(x=>DOMS[x.id]=x.name)}).catch(()=>{}),
+  fetch('projects/'+encodeURIComponent(pid)).then(r=>r.ok?r.json():null).then(p=>{ if(p){$('ptitle').textContent='Coverage · '+p.name; document.title=p.name+' — Coverage';}}).catch(()=>{}),
+]).then(loadStatement);
+
+function loadStatement(){
+  fetch('projects/'+encodeURIComponent(pid)+'/problem-statement').then(r=>r.json()).then(d=>{
+    ST=d && d.statement ? d.statement : null;
+    $('status').textContent = ST ? `v${d.version} · ${d.ratified?'ratified':'draft'} · overall ${ST.overall_confidence||'—'}` : '';
+    renderStatement(d); loadProfile();
+  });
+}
+
+function frameBtnRow(){
+  return `<div class="toolbar">
+    <input class="req" id="req" placeholder="Optional: a one-line request to seed framing (e.g. &quot;a booking app for my gym&quot;)">
+    <button class="btn" id="frame">▶ ${ST?'Re-frame':'Frame problem'}</button>
+    ${ST?'<button class="btn ghost" id="save">Save</button><button class="btn" id="ratify">Ratify</button>':''}
+  </div>`;
+}
+
+function provBadge(p){return `<span class="prov" style="background:${provColor(p)}">${esc(p||'—')}</span>`;}
+
+function listField(key,label,items){
+  const provs=(items||[]).map(i=>i.provenance);
+  const summ=['stated','inferred','assumed'].map(p=>{const n=provs.filter(x=>x===p).length;return n?`${n} ${p}`:''}).filter(Boolean).join(' · ');
+  return `<div class="field"><h3>${esc(label)} ${summ?`<span class="hint" style="margin:0">(${summ})</span>`:''}</h3>
+    <textarea data-list="${key}" rows="${Math.max(2,(items||[]).length)}">${esc((items||[]).map(i=>i.value).join('\n'))}</textarea>
+    <div class="hint">one per line</div></div>`;
+}
+function scalarField(key,label,obj){
+  obj=obj||{};
+  return `<div class="field"><h3>${esc(label)} ${provBadge(obj.provenance)} <span class="conf" style="background:${confColor(obj.confidence)};font-size:10.5px;padding:1px 7px">${esc(obj.confidence||'')}</span></h3>
+    <textarea data-scalar="${key}" rows="2">${esc(obj.value||'')}</textarea>
+    ${obj.source_quote?`<div class="hint">“${esc(obj.source_quote)}”</div>`:''}</div>`;
+}
+
+function renderStatement(d){
+  const el=$('pane-statement');
+  if(!ST){ el.innerHTML=frameBtnRow()+'<div class="empty">No problem statement yet. Click <b>Frame problem</b> — it distils a structured problem statement from this project\'s documents (and any one-line request), so the coverage analysis has something to check against.</div>'; wireToolbar(); return; }
+  const s=ST;
+  el.innerHTML=frameBtnRow()
+    + scalarField('purpose','Purpose',s.purpose)
+    + scalarField('context','Context',s.context)
+    + `<div class="field"><h3>Scope</h3><div class="two">
+        <div><div class="hint" style="margin:0 0 4px">IN</div><textarea data-scopein rows="3">${esc(((s.scope||{}).in||[]).join('\n'))}</textarea></div>
+        <div><div class="hint" style="margin:0 0 4px">OUT</div><textarea data-scopeout rows="3">${esc(((s.scope||{}).out||[]).join('\n'))}</textarea></div>
+      </div></div>`
+    + listField('capabilities','Capabilities',s.capabilities)
+    + listField('data_entities','Data entities',s.data_entities)
+    + listField('external_interfaces','External interfaces',s.external_interfaces)
+    + listField('constraints','Constraints',s.constraints)
+    + listField('success_criteria','Success criteria',s.success_criteria)
+    + listField('stakeholders','Stakeholders',s.stakeholders)
+    + (s.assumptions&&s.assumptions.length?`<div class="field"><h3>Assumptions the model made</h3><ul class="rd">${s.assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul></div>`:'')
+    + (s.clarifying_questions&&s.clarifying_questions.length?`<div class="field ask"><h3>Clarifying questions to answer</h3><ul class="rd">${s.clarifying_questions.map(q=>`<li>${esc(q)}</li>`).join('')}</ul></div>`:'');
+  wireToolbar();
+}
+
+function collectStatement(){
+  const s=JSON.parse(JSON.stringify(ST));
+  document.querySelectorAll('[data-scalar]').forEach(t=>{const k=t.dataset.scalar,o=s[k]||{};
+    s[k]=(t.value===o.value)?o:{value:t.value,provenance:'stated',confidence:o.confidence||'high',source_quote:o.source_quote||null};});
+  document.querySelectorAll('[data-list]').forEach(t=>{const k=t.dataset.list;const orig={};(ST[k]||[]).forEach(i=>orig[i.value]=i);
+    s[k]=t.value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>orig[l]||{value:l,provenance:'stated',confidence:'high'});});
+  const si=document.querySelector('[data-scopein]'), so=document.querySelector('[data-scopeout]');
+  if(si&&so){ s.scope=s.scope||{}; s.scope.in=si.value.split('\n').map(x=>x.trim()).filter(Boolean); s.scope.out=so.value.split('\n').map(x=>x.trim()).filter(Boolean); }
+  return s;
+}
+function put(ratified){
+  const statement=collectStatement();
+  return fetch('projects/'+encodeURIComponent(pid)+'/problem-statement',{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({statement,ratified})}).then(r=>r.json());
+}
+function wireToolbar(){
+  const f=$('frame'); if(f) f.addEventListener('click',reframe);
+  const sv=$('save'); if(sv) sv.addEventListener('click',()=>put(false).then(loadStatement));
+  const rt=$('ratify'); if(rt) rt.addEventListener('click',()=>put(true).then(loadStatement));
+}
+function reframe(){
+  const btn=$('frame'); btn.disabled=true; btn.textContent='Framing… (~20s)';
+  fetch('projects/'+encodeURIComponent(pid)+'/problem-statement:generate',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({user_request:($('req')?$('req').value:'')||''})}).then(r=>r.json())
+    .then(loadStatement).catch(()=>{btn.disabled=false;btn.textContent='▶ Frame problem';alert('Framing failed.');});
+}
+
+// ---- Profile tab ----
+function loadProfile(){
+  fetch('projects/'+encodeURIComponent(pid)+'/coverage-profile').then(r=>r.json()).then(d=>{PROFILE=d&&d.profile?d.profile:null; renderProfile();});
+}
+function renderProfile(){
+  const el=$('pane-profile');
+  if(!PROFILE){ el.innerHTML='<div class="empty">The profile is created when you frame the problem. It records the candidate archetypes and salient domains that will weight the coverage analysis — editable here.</div>'; return; }
+  const arche=PROFILE.archetypes||[], doms=PROFILE.salient_domains||[];
+  const archeOpts=Object.keys(ARCHE).filter(id=>!arche.some(a=>a.id===id)).map(id=>`<option value="${id}">${esc(ARCHE[id])}</option>`).join('');
+  const domOpts=Object.keys(DOMS).filter(id=>!doms.some(a=>a.id===id)).map(id=>`<option value="${id}">${esc(DOMS[id])}</option>`).join('');
+  el.innerHTML=`<div class="toolbar"><div class="hint" style="flex:1">These weight the coverage domain-judge panel. Add/remove as needed, then save.</div><button class="btn" id="saveprof">Save profile</button></div>
+    <div class="field"><h3>Candidate archetypes</h3><div id="arches">${arche.map(a=>chip('a',a.id,ARCHE[a.id]||a.id,a.confidence)).join('')||'<span class="hint">none</span>'}</div>
+      ${archeOpts?`<select class="add" id="addArche"><option value="">+ add archetype…</option>${archeOpts}</select>`:''}</div>
+    <div class="field"><h3>Salient coverage domains</h3><div id="domsWrap">${doms.map(a=>chip('d',a.id,DOMS[a.id]||a.id,a.confidence)).join('')||'<span class="hint">none</span>'}</div>
+      ${domOpts?`<select class="add" id="addDom"><option value="">+ add domain…</option>${domOpts}</select>`:''}</div>`;
+  el.querySelectorAll('.chip .x').forEach(x=>x.addEventListener('click',()=>{const k=x.dataset.k,id=x.dataset.id;
+    if(k==='a') PROFILE.archetypes=arche.filter(a=>a.id!==id); else PROFILE.salient_domains=doms.filter(a=>a.id!==id); renderProfile();}));
+  const aa=$('addArche'); if(aa) aa.addEventListener('change',()=>{if(aa.value){PROFILE.archetypes=[...arche,{id:aa.value,confidence:'medium',why:'added manually'}];renderProfile();}});
+  const ad=$('addDom'); if(ad) ad.addEventListener('change',()=>{if(ad.value){PROFILE.salient_domains=[...doms,{id:ad.value,confidence:'medium',why:'added manually'}];renderProfile();}});
+  $('saveprof').addEventListener('click',()=>fetch('projects/'+encodeURIComponent(pid)+'/coverage-profile',{method:'PUT',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:PROFILE})}).then(()=>{$('saveprof').textContent='Saved ✓';setTimeout(()=>$('saveprof').textContent='Save profile',1500);}));
+}
+function chip(k,id,name,conf){return `<span class="chip"><b>${esc(name)}</b><span class="conf" style="background:${confColor(conf)};font-size:10px;padding:1px 6px">${esc(conf||'')}</span><button class="x" data-k="${k}" data-id="${esc(id)}" title="remove">×</button></span>`;}
+</script>

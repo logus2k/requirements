@@ -135,3 +135,32 @@ def get_quality_scorecard(pid: str, run_id: str | None = None) -> dict | None:
             return None
         run_id = sorted(runs, key=lambda r: r.get("finished_at") or "")[-1]["run_id"]
     return _read_json(os.path.join(_quality_dir(pid, run_id), "scorecard.json"))
+
+
+# ---- problem statement & coverage profile (versioned, human-ratifiable) ----
+
+def get_problem_statement(pid: str) -> dict | None:
+    return _read_json(os.path.join(_project_dir(pid), "problem_statement.json"))
+
+
+def save_problem_statement(pid: str, statement: dict, ratified: bool = False) -> dict:
+    if not get_project(pid):
+        return None
+    cur = get_problem_statement(pid) or {"version": 0}
+    doc = {"version": cur.get("version", 0) + 1, "ratified": bool(ratified),
+           "updated_at": _now(), "statement": statement}
+    _write_json(os.path.join(_project_dir(pid), "problem_statement.json"), doc)
+    return doc
+
+
+def get_coverage_profile(pid: str) -> dict | None:
+    return _read_json(os.path.join(_project_dir(pid), "coverage_profile.json"))
+
+
+def save_coverage_profile(pid: str, profile: dict) -> dict:
+    if not get_project(pid):
+        return None
+    cur = get_coverage_profile(pid) or {"version": 0}
+    doc = {"version": cur.get("version", 0) + 1, "updated_at": _now(), "profile": profile}
+    _write_json(os.path.join(_project_dir(pid), "coverage_profile.json"), doc)
+    return doc

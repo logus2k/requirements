@@ -44,6 +44,7 @@ services:
     volumes:
       - ./store:/app/store                       # persist jobs + scorecards
       - ./frontend/data:/app/frontend/data:ro    # existing scorecards in the picker
+      - ./catalog:/app/catalog:ro                # coverage catalog (domains, archetypes, standard packs)
 
 volumes:
   docling_cache:
