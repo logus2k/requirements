@@ -256,7 +256,9 @@
   }
 
   // ---- detail drawer: requirement text on top, C and R as peer columns ----
-  const provStr = r => `${(r.provenance && r.provenance.section_path) || ''}${r.provenance && r.provenance.page ? ' · p.' + r.provenance.page : ''}`;
+  const provStr = r => { const p = r.provenance || {};
+    return [p.source_document, p.section_path].filter(Boolean).join(' · ')      // source_document = traceability
+      + (p.page ? ' · p.' + p.page : ''); };
 
   // Requirement text with the deterministic rules' offending spans highlighted.
   // Offsets index the RAW text, so we highlight raw (not fmtText) to stay aligned.
@@ -491,8 +493,48 @@
     openReq = null;
     renderAll();
     renderTable();
+    renderOverlaps();
+    renderSetLevel();
     // The detail pane is always visible; pre-select the first requirement so it's never empty.
     if (currentRows.length) openDrawer(currentRows[0]);
+  }
+
+  // ---- tabs: Dashboard | Overlaps | Set-level ----
+  function switchTab(name) {
+    ['dashboard', 'overlaps', 'setlevel'].forEach(t =>
+      document.getElementById('tab-' + t).hidden = t !== name);
+    document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    if (name === 'dashboard') resizeCharts();
+  }
+
+  const ovColor = s => s >= .95 ? cssVar('--s1') : s >= .90 ? cssVar('--s2') : s >= .85 ? cssVar('--s3') : cssVar('--s4');
+  function renderOverlaps() {
+    const ov = (D.set_level && D.set_level.overlaps) || [];
+    const el = document.getElementById('ovBody');
+    if (!ov.length) { el.innerHTML = '<div class="rnone">No confirmed overlaps in this project.</div>'; return; }
+    el.innerHTML = '<div class="paneintro">Requirement pairs judged to duplicate or substantially overlap — the percentage is their similarity (higher = stronger overlap). Resolve by merging or clearly differentiating them.</div>'
+      + ov.slice().sort((a, b) => b.score - a.score).map(o => { const a = byId[o.a_id], b = byId[o.b_id];
+        return `<div class="ovpair"><div class="ovtop"><span class="ovids">${esc(o.a_id)} ~ ${esc(o.b_id)}</span>
+          <span class="ovsc" style="background:${ovColor(o.score)}" title="similarity ${o.score}">${Math.round(o.score * 100)}%</span></div>
+          <div class="ovreq"><span class="rid">${esc(o.a_id)}</span>${a ? esc(a.text) : ''}</div>
+          <div class="ovreq"><span class="rid">${esc(o.b_id)}</span>${b ? esc(b.text) : ''}</div></div>`; }).join('');
+  }
+  function renderSetLevel() {
+    const a = (D.set_level && D.set_level.set_assessment) || [];
+    const el = document.getElementById('slBody');
+    if (!a.length) { el.innerHTML = '<div class="rnone">No set-level assessment.</div>'; return; }
+    el.innerHTML = '<div class="paneintro">Whole-set INCOSE characteristics (C10–C15): the requirement set judged as a whole for completeness, consistency, feasibility, comprehensibility, validatability and correctness.</div>'
+      + a.map(x => `<div class="slcard"><div class="sltop"><span class="slname">${esc(x.characteristic)}</span>
+        <span class="badge" style="background:${scoreColor(x.score)}">${x.score}</span></div>
+        <div class="sljust">${esc(x.justification || '')}</div></div>`).join('');
+  }
+
+  function showNoRun() {
+    document.getElementById('norun').hidden = false;
+    document.getElementById('tabbar').style.display = 'none';
+    ['dashboard', 'overlaps', 'setlevel'].forEach(t => document.getElementById('tab-' + t).hidden = true);
+    const hw = document.querySelector('.hwrap'); if (hw) hw.style.visibility = 'hidden';
+    const ct = document.getElementById('chartsToggle'); if (ct) ct.style.display = 'none';
   }
 
   // ---- one-time wiring (independent of which document is loaded) ----
@@ -501,6 +543,8 @@
 
   // click a rule bar -> its rule-centric panel (guidance + affected requirements)
   charts.rules.on('click', p => { const id = ruleBarIds[p.dataIndex]; if (id) openRulePanel(id); });
+
+  document.querySelectorAll('.tabbtn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
   document.querySelectorAll('th[data-key]').forEach(th =>
     th.addEventListener('click', () => {
@@ -577,8 +621,18 @@
   const rulesP = fetch('rules').then(r => r.ok ? r.json() : {}).catch(() => ({}));
 
   // ---- boot: pick data mode ----
+  const projectId = new URLSearchParams(location.search).get('project');
   if (window.SCORECARD) {                      // single-document inlined build
     rulesP.then(m => { RULES = m || {}; showOnly(window.SCORECARD.source_file); loadScorecard(window.SCORECARD); });
+  } else if (projectId) {                      // projects mode: this project's latest Quality run
+    const dp = document.getElementById('docpick'); if (dp) dp.style.display = 'none';
+    const P = encodeURIComponent(projectId);
+    rulesP.then(m => { RULES = m || {};
+      return fetch('projects/' + P + '/quality').then(r => r.ok ? r.json() : { runs: [] }); })
+      .then(d => { if (!d.runs || !d.runs.length) { showNoRun(); return null; }   // no run yet — avoid a 404
+        return fetch('projects/' + P + '/quality/scorecard').then(r => r.json()); })
+      .then(sc => { if (sc) loadScorecard(sc); })
+      .catch(() => showNoRun());
   } else {                                     // multi-document mode
     // The picker merges two sources: curated static scorecards under data/, and
     // documents assessed live through the orchestration API (GET documents ->

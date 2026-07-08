@@ -107,6 +107,23 @@ async function upload(files) {
   finally { $('drop').classList.remove('over'); $('file').value = ''; }
 }
 
+async function runQuality() {
+  const btn = $('runQuality');
+  btn.disabled = true; btn.textContent = 'Starting…';
+  try {
+    const res = await fetch('projects/' + encodeURIComponent(pid) + '/quality:run', { method: 'POST' }).then(r => r.json());
+    if (!res.job_id) throw new Error('no job');
+    const timer = setInterval(async () => {
+      const s = await fetch('jobs/' + res.job_id).then(r => r.json()).catch(() => null);
+      if (!s) return;
+      if (s.status === 'running') { btn.textContent = 'Running… ' + (s.stage || ''); }
+      else if (s.status === 'done') { clearInterval(timer); location.href = 'index.html?project=' + encodeURIComponent(pid); }
+      else if (s.status === 'error') { clearInterval(timer); btn.disabled = false; btn.textContent = '▶ Run Quality'; alert('Quality run failed:\n' + (s.error || 'unknown error')); }
+    }, 2000);
+  } catch (e) { btn.disabled = false; btn.textContent = '▶ Run Quality'; alert('Could not start the quality run.'); }
+}
+$('runQuality').addEventListener('click', runQuality);
+
 $('file').addEventListener('change', e => upload(e.target.files));
 const drop = $('drop');
 ['dragover', 'dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));

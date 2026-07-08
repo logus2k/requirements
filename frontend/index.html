@@ -189,7 +189,29 @@
   .muted{color:var(--muted)}
   .linkbtn{border:none;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;font-weight:600}
   .linkbtn:hover{text-decoration:underline}
-  .ovpair .top{display:flex;gap:8px} .ovpair .sc{margin-left:auto;color:var(--muted)}
+  /* Tabs: Dashboard | Overlaps | Set-level (no sliding panels) */
+  .tabbar{flex:none;display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--border);background:var(--surface)}
+  .tabbtn{background:none;border:none;padding:11px 15px;color:var(--muted);font:inherit;font-size:13.5px;
+    font-weight:600;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabbtn:hover{color:var(--ink)} .tabbtn.active{color:var(--ink);border-bottom-color:var(--accent)}
+  .tabpane{flex:1;min-height:0;display:flex;flex-direction:column}
+  .tabpane[hidden]{display:none}
+  #ovBody,#slBody{flex:1;min-height:0;overflow:auto;padding:18px 22px}
+  .paneintro{color:var(--muted);font-size:13px;margin-bottom:14px;max-width:820px}
+  .norun{margin:26px 22px;padding:18px 20px;border:1px solid var(--border);border-radius:11px;
+    background:var(--surface);color:var(--ink2);max-width:560px}
+  .norun b{color:var(--ink)}
+  .ovpair{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:13px 15px;margin:11px 0;max-width:1000px}
+  .ovpair .ovtop{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+  .ovpair .ovids{font-weight:700;font-size:14px}
+  .ovpair .ovsc{margin-left:auto;min-width:44px;text-align:center;border-radius:6px;padding:2px 9px;
+    color:#fff;font-weight:700;font-size:13px;font-variant-numeric:tabular-nums}
+  .ovpair .ovreq{color:var(--ink2);font-size:13px;margin:5px 0;padding-left:11px;border-left:2px solid var(--grid)}
+  .ovpair .ovreq .rid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);font-size:12px;margin-right:7px}
+  .slcard{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:13px 15px;margin:10px 0;max-width:1000px}
+  .slcard .sltop{display:flex;align-items:center;gap:10px}
+  .slcard .slname{font-weight:700;font-size:14px}
+  .slcard .sljust{color:var(--ink2);font-size:13px;margin-top:7px}
 </style>
 <script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
 <link rel="stylesheet" href="css/nav.css">
@@ -209,6 +231,13 @@
   </div>
   <button class="caret" id="chartsToggle" title="Collapse / expand the chart row"></button>
 </header>
+<div class="tabbar" id="tabbar">
+  <button class="tabbtn active" data-tab="dashboard">Dashboard</button>
+  <button class="tabbtn" data-tab="overlaps">Overlaps</button>
+  <button class="tabbtn" data-tab="setlevel">Set-level</button>
+</div>
+<div class="norun" id="norun" hidden>No quality run yet for this project. Open <b>Documents</b> and click <b>▶ Run Quality</b>.</div>
+<div class="tabpane" id="tab-dashboard">
 <section class="charts">
   <div class="card"><h2>Characteristic profile</h2>
     <div class="sub">Mean score per characteristic (C1–C9)</div>
@@ -250,6 +279,9 @@
   <aside class="detail-col" id="drawer"><div id="drawerBody"></div></aside>
   <aside class="sugg-col" id="suggcol"><div id="suggBody"></div></aside>
 </div>
+</div><!-- /tab-dashboard -->
+<div class="tabpane" id="tab-overlaps" hidden><div id="ovBody"></div></div>
+<div class="tabpane" id="tab-setlevel" hidden><div id="slBody"></div></div>
 
 <script src="vendor/echarts.min.js"></script>
 <!-- Multi-document: app.js fetches data/index.json then the selected scorecard.
