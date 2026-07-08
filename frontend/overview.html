@@ -100,6 +100,9 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
     padding:11px 18px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
   .abortall:hover{background:color-mix(in srgb,var(--s1) 12%,transparent)}
   .abortall:disabled{opacity:.5;cursor:default}
+  .delbtn{border:1px solid var(--s1);background:var(--s1);color:#fff;border-radius:10px;
+    padding:11px 18px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .delbtn:hover{filter:brightness(1.06)} .delbtn:disabled{opacity:.5;cursor:default;filter:none}
 
   .note{background:var(--surface);border:1px solid var(--border);border-radius:11px;
     padding:14px 17px;color:var(--ink2);font-size:13px;line-height:1.6;max-width:820px}
@@ -115,6 +118,7 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   <div class="rail">
     <div class="hint">Run the whole pipeline, or run one stage at a time — each stage unlocks once the ones before it have run.</div>
     <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+      <button class="delbtn" id="delProject" title="Delete this project and all its data">🗑 Delete</button>
       <button class="abortall" id="abortAll" style="display:none">■ Abort</button>
       <button class="runall" id="runAll" disabled><span>▶</span> Run All</button>
     </div>
@@ -408,5 +412,18 @@ function resetAbortAll() { const b = $('abortAll'); if (b) { b.disabled = false;
 
 $('runAll').addEventListener('click', runAll);
 $('abortAll').addEventListener('click', abortAll);
+
+$('delProject').addEventListener('click', async () => {
+  const name = $('ptitle').textContent || 'this project';
+  if (!confirm(`Delete "${name}" and all its documents and analysis runs?\n\nThis cannot be undone.`)) return;
+  const b = $('delProject'); b.disabled = true; b.textContent = 'Deleting…';
+  try {
+    const r = await fetch('projects/' + encodeURIComponent(pid), { method: 'DELETE' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    try { localStorage.removeItem('reqoach-project'); localStorage.removeItem('reqoach-project-name'); } catch (e) {}
+    location.replace('projects.html');
+  } catch (e) { b.disabled = false; b.textContent = '🗑 Delete'; alert('Could not delete project:\n' + e.message); }
+});
+
 loadState().catch(() => location.replace('projects.html'));
 </script>

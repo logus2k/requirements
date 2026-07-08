@@ -30,12 +30,13 @@
   nav.className = "reqoach-nav";
   nav.innerHTML =
     '<a class="brand" href="projects.html">reqoach</a>' +
-    `<a class="proj${pid ? "" : " none"}" href="projects.html" title="Switch / manage projects">` +
-      (pid ? esc(pname || "project") : "Select project…") + "</a>" +
     PAGES.map(p =>
       `<a class="item${p.match === cur ? " active" : ""}" href="${p.href}">${p.label}</a>`
     ).join("") +
     '<span class="spacer"></span>' +
+    // Current-project chip lives on the right, just before the theme toggle.
+    `<a class="proj${pid ? "" : " none"}" href="projects.html" title="Switch / manage projects">` +
+      (pid ? esc(pname || "project") : "Select project…") + "</a>" +
     '<button class="tbtn" id="reqoach-theme" title="Toggle light / dark">◐ Theme</button>';
   document.body.prepend(nav);
 

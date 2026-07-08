@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import shutil
 import uuid
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -72,6 +73,16 @@ def list_projects() -> list[dict]:
 
 def get_project(pid: str) -> dict | None:
     return _read_json(os.path.join(_project_dir(pid), "meta.json"))
+
+
+def delete_project(pid: str) -> bool:
+    """Remove a project and everything under it (documents, quality/coverage runs,
+    problem statement, profile). Returns False if the project doesn't exist."""
+    d = _project_dir(pid)
+    if not os.path.isdir(d):
+        return False
+    shutil.rmtree(d, ignore_errors=True)
+    return True
 
 
 # ---- documents ----

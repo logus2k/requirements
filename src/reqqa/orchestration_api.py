@@ -465,6 +465,18 @@ def get_project(pid: str) -> dict:
     return proj
 
 
+@api.delete("/projects/{pid}")
+def delete_project(pid: str) -> dict:
+    """Delete a project and all of its data. Any in-flight job for it is signalled to abort."""
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    for job in jm.jobs.values():
+        if job.project_id == pid and job.status in ("queued", "running"):
+            job.cancel_event.set()
+    pj.delete_project(pid)
+    return {"deleted": pid}
+
+
 @api.post("/projects/{pid}/documents")
 async def upload_project_documents(pid: str, files: list[UploadFile] = File(...)) -> JSONResponse:
     if not pj.get_project(pid):
