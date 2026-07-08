@@ -622,8 +622,10 @@
 
   // ---- boot: pick data mode ----
   const reveal = () => { document.body.style.visibility = 'visible'; };   // undo the pre-render hide
-  const projectId = new URLSearchParams(location.search).get('project')
-    || (() => { try { return localStorage.getItem('reqoach-project'); } catch (e) { return null; } })();
+  // Startup: the project must be chosen explicitly via ?project=… (in-app links always
+  // carry it). A bare visit — e.g. opening the app root — deliberately does NOT resume the
+  // last project; it falls through to the switcher below so the user picks one each start.
+  const projectId = new URLSearchParams(location.search).get('project');
   if (window.SCORECARD) {                      // single-document inlined build
     reveal();
     rulesP.then(m => { RULES = m || {}; showOnly(window.SCORECARD.source_file); loadScorecard(window.SCORECARD); });

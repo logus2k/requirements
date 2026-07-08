@@ -52,8 +52,7 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
 <header>
   <div><h1 id="ptitle">Documents</h1></div>
   <div class="runs">
-    <button class="btn" id="runQuality" disabled title="Runs the INCOSE quality analysis over this project's documents (next step)">▶ Run Quality</button>
-    <button class="btn ghost" id="runCoverage" disabled title="Runs the requirements-coverage analysis (coming soon)">▶ Run Coverage</button>
+    <a class="btn ghost" id="toPipeline" href="overview.html" title="Runs are driven from the project pipeline">← Pipeline</a>
   </div>
 </header>
 <main>
@@ -77,7 +76,6 @@ if (!pid) { location.href = 'projects.html'; }
 
 function renderDocs(docs) {
   $('count').textContent = docs.length;
-  $('runQuality').disabled = !docs.length;                    // enabled in the next phase's wiring
   $('list').innerHTML = docs.length ? docs.map(d => `
     <div class="doc"><span class="ext">${esc((d.ext || '').replace('.', ''))}</span>
       <span class="fn">${esc(d.filename)}</span>
@@ -109,22 +107,7 @@ async function upload(files) {
   finally { $('drop').classList.remove('over'); $('file').value = ''; }
 }
 
-async function runQuality() {
-  const btn = $('runQuality');
-  btn.disabled = true; btn.textContent = 'Starting…';
-  try {
-    const res = await fetch('projects/' + encodeURIComponent(pid) + '/quality:run', { method: 'POST' }).then(r => r.json());
-    if (!res.job_id) throw new Error('no job');
-    const timer = setInterval(async () => {
-      const s = await fetch('jobs/' + res.job_id).then(r => r.json()).catch(() => null);
-      if (!s) return;
-      if (s.status === 'running') { btn.textContent = 'Running… ' + (s.stage || ''); }
-      else if (s.status === 'done') { clearInterval(timer); location.href = 'index.html?project=' + encodeURIComponent(pid); }
-      else if (s.status === 'error') { clearInterval(timer); btn.disabled = false; btn.textContent = '▶ Run Quality'; alert('Quality run failed:\n' + (s.error || 'unknown error')); }
-    }, 2000);
-  } catch (e) { btn.disabled = false; btn.textContent = '▶ Run Quality'; alert('Could not start the quality run.'); }
-}
-$('runQuality').addEventListener('click', runQuality);
+$('toPipeline').href = 'overview.html?project=' + encodeURIComponent(pid);   // runs live on the pipeline now
 
 $('file').addEventListener('change', e => upload(e.target.files));
 const drop = $('drop');

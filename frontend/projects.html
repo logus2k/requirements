@@ -1,10 +1,13 @@
 <!-- Projects — landing / switcher (projects mode, see specs/projects_mode/). Create a
      project or open an existing one; selecting a project stores it as the current
-     project (localStorage) and opens its Documents view. -->
+     project (localStorage) and opens its Overview (pipeline) home. -->
 <meta charset="utf-8">
 <title>Projects · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
+// The switcher is "choose a project" — clear any remembered selection so nothing is active
+// until the user picks one here (runs before nav.js, so the nav chip shows "Select project…").
+try{localStorage.removeItem('reqoach-project');localStorage.removeItem('reqoach-project-name');}catch(e){}</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -59,14 +62,14 @@ const fmtDate = iso => { const d = iso ? iso.slice(0, 10) : ''; return d; };
 
 function openProject(p) {
   try { localStorage.setItem('reqoach-project', p.id); localStorage.setItem('reqoach-project-name', p.name || 'project'); } catch (e) {}
-  location.href = 'documents.html?project=' + encodeURIComponent(p.id);
+  location.href = 'overview.html?project=' + encodeURIComponent(p.id);
 }
 
 function render(projects) {
   const g = $('grid');
   if (!projects.length) { g.innerHTML = '<div class="none">No projects yet. Create one above to get started.</div>'; return; }
   g.innerHTML = projects.map(p => `
-    <a class="card" href="documents.html?project=${encodeURIComponent(p.id)}" data-id="${esc(p.id)}" data-name="${esc(p.name)}">
+    <a class="card" href="overview.html?project=${encodeURIComponent(p.id)}" data-id="${esc(p.id)}" data-name="${esc(p.name)}">
       <h2>${esc(p.name)}</h2>
       <div class="meta">Created ${esc(fmtDate(p.created_at))}</div>
       <span class="count">${p.document_count || 0} document${(p.document_count || 0) !== 1 ? 's' : ''}</span>
