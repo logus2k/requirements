@@ -33,7 +33,7 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   .btn.ghost{background:transparent;color:var(--ink);border-color:var(--border)}
   .btn.ghost:hover{border-color:var(--accent);filter:none}
   .btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
-  .drop{border:2px dashed var(--border);border-radius:12px;padding:26px;text-align:center;
+  .drop{display:block;border:2px dashed var(--border);border-radius:12px;padding:26px;text-align:center;
     color:var(--muted);background:var(--surface);cursor:pointer;transition:border-color .12s,background .12s;margin-bottom:20px}
   .drop.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 6%,var(--surface))}
   .drop b{color:var(--ink)}
