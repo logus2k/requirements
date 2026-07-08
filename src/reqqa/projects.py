@@ -164,3 +164,34 @@ def save_coverage_profile(pid: str, profile: dict) -> dict:
     doc = {"version": cur.get("version", 0) + 1, "updated_at": _now(), "profile": profile}
     _write_json(os.path.join(_project_dir(pid), "coverage_profile.json"), doc)
     return doc
+
+
+# ---- coverage runs (domain-judge panel output) ----
+
+def _coverage_dir(pid: str, run_id: str) -> str:
+    return os.path.join(_project_dir(pid), "coverage", run_id)
+
+
+def save_coverage_run(pid: str, run_id: str, coverage: dict, meta: dict) -> None:
+    _write_json(os.path.join(_coverage_dir(pid, run_id), "coverage.json"), coverage)
+    _write_json(os.path.join(_coverage_dir(pid, run_id), "meta.json"), meta)
+    proj = get_project(pid)
+    if proj is not None:
+        runs = [r for r in proj.get("coverage_runs", []) if r.get("run_id") != run_id]
+        runs.append(meta)
+        proj["coverage_runs"] = runs
+        _write_json(os.path.join(_project_dir(pid), "meta.json"), proj)
+
+
+def list_coverage_runs(pid: str) -> list[dict]:
+    proj = get_project(pid)
+    return proj.get("coverage_runs", []) if proj else []
+
+
+def get_coverage(pid: str, run_id: str | None = None) -> dict | None:
+    runs = list_coverage_runs(pid)
+    if run_id is None:
+        if not runs:
+            return None
+        run_id = sorted(runs, key=lambda r: r.get("finished_at") or "")[-1]["run_id"]
+    return _read_json(os.path.join(_coverage_dir(pid, run_id), "coverage.json"))

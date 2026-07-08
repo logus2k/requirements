@@ -5,7 +5,9 @@
 <meta charset="utf-8">
 <title>Coverage · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
+// project-scoped: with no project, go to the switcher BEFORE render (no page flash)
+if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('reqoach-project'))location.replace('projects.html');</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{--surface:#fcfcfb;--plane:#e9e9e9;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
@@ -48,6 +50,23 @@
   .chip b{font-weight:600} .chip .x{cursor:pointer;color:var(--muted);border:none;background:none;font-size:15px;line-height:1;padding:0 4px}
   .chip .x:hover{color:var(--s1)}
   select.add{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--ink);font:inherit;font-size:13px;margin-top:8px}
+  /* Coverage tab */
+  .heat{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin:14px 0 22px}
+  .cell{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:9px 11px;cursor:pointer;border-left:4px solid var(--muted)}
+  .cell:hover{border-color:var(--accent)} .cell.sel{box-shadow:0 0 0 2px var(--accent)}
+  .cell .dn{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cell .cm{display:flex;align-items:center;gap:6px;margin-top:5px;font-size:11px;color:var(--muted)}
+  .lvl{color:#fff;border-radius:4px;padding:1px 7px;font-size:10.5px;font-weight:700;text-transform:uppercase}
+  .sumbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
+  .pill{border-radius:20px;padding:3px 11px;font-size:12px;font-weight:600;color:#fff}
+  .gap{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:9px 0;border-left:4px solid var(--muted)}
+  .gap .gtop{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .gap .sev{color:#fff;border-radius:4px;padding:1px 8px;font-size:10.5px;font-weight:700;text-transform:uppercase}
+  .gap .gd{color:var(--muted);font-size:12px} .gap .gt{font-weight:600}
+  .gap .detail{color:var(--ink2);font-size:13px;margin:6px 0}
+  .gap .q{font-size:13px;margin-top:5px} .gap .q b{color:var(--accent)}
+  .gap .grounding{margin-top:6px}
+  .gtag{display:inline-block;background:var(--panel2);border:1px solid var(--border);border-radius:5px;padding:1px 7px;margin:2px 4px 0 0;font-size:11px;color:var(--ink2);font-family:ui-monospace,Menlo,monospace}
 </style>
 
 <header>
@@ -57,10 +76,12 @@
 <div class="tabbar">
   <button class="tabbtn active" data-tab="statement">Problem Statement</button>
   <button class="tabbtn" data-tab="profile">Profile</button>
+  <button class="tabbtn" data-tab="coverage">Coverage</button>
 </div>
 <main>
   <div class="pane" id="pane-statement"></div>
   <div class="pane" id="pane-profile" hidden></div>
+  <div class="pane" id="pane-coverage" hidden></div>
 </main>
 
 <script src="js/nav.js"></script>
@@ -79,7 +100,11 @@ document.querySelectorAll('.tabbtn').forEach(b=>b.addEventListener('click',()=>{
   document.querySelectorAll('.tabbtn').forEach(x=>x.classList.toggle('active',x===b));
   $('pane-statement').hidden=b.dataset.tab!=='statement';
   $('pane-profile').hidden=b.dataset.tab!=='profile';
+  $('pane-coverage').hidden=b.dataset.tab!=='coverage';
+  if(b.dataset.tab==='coverage' && COV===undefined) loadCoverage();
 }));
+const covColor=c=>({strong:cssVar('--s5'),partial:cssVar('--s4'),weak:cssVar('--s2'),absent:cssVar('--s1')}[c]||cssVar('--muted'));
+const sevColor=s=>({critical:cssVar('--s1'),high:cssVar('--s2'),medium:cssVar('--s3'),low:cssVar('--s4')}[s]||cssVar('--muted'));
 
 // ---- boot ----
 Promise.all([
@@ -192,4 +217,45 @@ function renderProfile(){
     headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:PROFILE})}).then(()=>{$('saveprof').textContent='Saved ✓';setTimeout(()=>$('saveprof').textContent='Save profile',1500);}));
 }
 function chip(k,id,name,conf){return `<span class="chip"><b>${esc(name)}</b><span class="conf" style="background:${confColor(conf)};font-size:10px;padding:1px 6px">${esc(conf||'')}</span><button class="x" data-k="${k}" data-id="${esc(id)}" title="remove">×</button></span>`;}
+
+// ---- Coverage tab ----
+let COV=undefined, covFilter=null;
+function loadCoverage(){ fetch('projects/'+encodeURIComponent(pid)+'/coverage').then(r=>r.ok?r.json():null).then(c=>{COV=c;renderCoverage();}); }
+function runCoverage(){
+  const btn=$('runcov'); if(btn){btn.disabled=true;btn.textContent='Running…';}
+  fetch('projects/'+encodeURIComponent(pid)+'/coverage:run',{method:'POST'}).then(r=>r.json()).then(res=>{
+    const job=res.job_id, t=setInterval(()=>{ fetch('jobs/'+job).then(r=>r.json()).then(s=>{
+      if(s.status==='running'){ if($('runcov')) $('runcov').textContent='Running… '+((s.progress||{}).done||0)+'/16'; }
+      else if(s.status==='done'){ clearInterval(t); loadCoverage(); }
+      else if(s.status==='error'){ clearInterval(t); if($('runcov')){$('runcov').disabled=false;$('runcov').textContent='▶ Run Coverage';} alert('Coverage run failed:\n'+(s.error||'')); }
+    }).catch(()=>{}); },2500);
+  }).catch(()=>{ if(btn){btn.disabled=false;btn.textContent='▶ Run Coverage';} alert('Could not start coverage run.'); });
+}
+function renderCoverage(){
+  const el=$('pane-coverage');
+  const runRow=`<div class="toolbar"><button class="btn" id="runcov">▶ ${COV?'Re-run Coverage':'Run Coverage'}</button>
+    <div class="hint" style="flex:1">Runs the 16 domain-expert judges over this project's requirements + problem statement (~30–60s). Reports gaps &amp; questions, not a score.</div></div>`;
+  if(!COV){ el.innerHTML=runRow+'<div class="empty">No coverage run yet. Frame the problem first (so the judges have intent to check against), then click <b>Run Coverage</b>.</div>'; wireCov(); return; }
+  const doms=COV.domains||[], gaps=COV.gaps||[];
+  const sumPills=['critical','high','medium','low'].map(s=>{const n=gaps.filter(g=>g.severity===s).length;return n?`<span class="pill" style="background:${sevColor(s)}">${n} ${s}</span>`:''}).filter(Boolean).join('');
+  const heat=doms.map(d=>`<div class="cell ${covFilter===d.id?'sel':''}" data-dom="${esc(d.id)}" style="border-left-color:${covColor(d.coverage)}">
+     <div class="dn" title="${esc(d.name)}">${esc(d.name)}</div>
+     <div class="cm"><span class="lvl" style="background:${covColor(d.coverage)}">${esc(d.coverage||'—')}</span> ${(d.gaps||[]).length} gap${(d.gaps||[]).length!==1?'s':''}</div></div>`).join('');
+  const shown=covFilter?gaps.filter(g=>g.domain===covFilter):gaps;
+  const gapHtml=shown.map(g=>`<div class="gap" style="border-left-color:${sevColor(g.severity)}">
+     <div class="gtop"><span class="sev" style="background:${sevColor(g.severity)}">${esc(g.severity||'')}</span>
+       <span class="gt">${esc(g.title||'')}</span><span class="gd">· ${esc(g.domain_name||g.domain||'')}</span></div>
+     ${g.detail?`<div class="detail">${esc(g.detail)}</div>`:''}
+     ${g.question?`<div class="q"><b>Ask:</b> ${esc(g.question)}</div>`:''}
+     ${(g.grounding&&g.grounding.length)?`<div class="grounding">${g.grounding.map(x=>`<span class="gtag">${esc(x)}</span>`).join('')}</div>`:''}</div>`).join('');
+  el.innerHTML=runRow
+    +`<div class="sumbar">${sumPills}<span class="hint">· ${COV.requirement_count} requirements · ${gaps.length} gaps across 16 domains</span></div>`
+    +`<div class="heat">${heat}</div>`
+    +`<div class="sumbar"><b style="font-size:13px">Gaps${covFilter?' · '+esc(doms.find(d=>d.id===covFilter)?.name||covFilter):''}</b>${covFilter?'<button class="btn ghost" id="clearf" style="padding:3px 10px">clear filter</button>':''}</div>`
+    +(gapHtml||'<div class="empty">No gaps in this view.</div>');
+  wireCov();
+  el.querySelectorAll('.cell').forEach(c=>c.addEventListener('click',()=>{covFilter=covFilter===c.dataset.dom?null:c.dataset.dom;renderCoverage();}));
+  const cf=$('clearf'); if(cf) cf.addEventListener('click',()=>{covFilter=null;renderCoverage();});
+}
+function wireCov(){ const b=$('runcov'); if(b) b.addEventListener('click',runCoverage); }
 </script>

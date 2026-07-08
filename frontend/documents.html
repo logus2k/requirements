@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <title>Documents · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
+// project-scoped: with no project, go to the switcher BEFORE render (no page flash)
+if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('reqoach-project'))location.replace('projects.html');</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{

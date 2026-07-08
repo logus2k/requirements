@@ -43,6 +43,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from reqqa import coverage
 from reqqa import framing
 from reqqa import projects as pj
 from reqqa.assess import iter_assessment
@@ -169,6 +170,33 @@ class JobManager:
         self.jobs[job.job_id] = job
         threading.Thread(target=self._run_project, args=(job, docs, source_file, options),
                          daemon=True).start()
+        return job
+
+    # --- coverage (domain-judge panel) runs ---
+    def _run_coverage(self, job: Job) -> None:
+        job.status = "running"
+        self._emit(job, {"type": "stage", "stage": "queued", "status": "done"})
+        try:
+            for event in coverage.iter_coverage_for_project(job.project_id):
+                self._emit(job, event)
+                if event.get("type") == "coverage":
+                    meta = {"run_id": job.run_id, "project_id": job.project_id, "kind": "coverage",
+                            "finished_at": pj._now(),
+                            "requirement_count": event["data"].get("requirement_count"),
+                            "gap_count": len(event["data"].get("gaps", []))}
+                    pj.save_coverage_run(job.project_id, job.run_id, event["data"], meta)
+            job.status = "done"
+            self._emit(job, {"type": "job_done", "project_id": job.project_id, "run_id": job.run_id})
+        except Exception as e:  # noqa: BLE001
+            job.status = "error"
+            job.error = f"{type(e).__name__}: {e}"
+            self._emit(job, {"type": "job_error", "message": job.error})
+
+    def create_coverage_run(self, pid: str) -> Job:
+        job = Job(job_id=uuid.uuid4().hex, doc_id="", source_file="")
+        job.project_id, job.run_id, job.kind = pid, job.job_id, "coverage"
+        self.jobs[job.job_id] = job
+        threading.Thread(target=self._run_coverage, args=(job,), daemon=True).start()
         return job
 
 
@@ -488,6 +516,26 @@ async def put_coverage_profile(pid: str, payload: dict) -> dict:
 
 
 # --- Coverage catalog (read-only, for the UI) ---
+
+@api.post("/projects/{pid}/coverage:run")
+def run_project_coverage(pid: str) -> JSONResponse:
+    """Explicit, user-triggered coverage run: the domain-judge panel over the project's
+    requirement set + problem statement. Streamed via socket.io (join {run_id})."""
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    job = jm.create_coverage_run(pid)
+    return JSONResponse(status_code=202,
+                        content={"job_id": job.job_id, "run_id": job.run_id,
+                                 "project_id": pid, "status": job.status})
+
+
+@api.get("/projects/{pid}/coverage")
+def get_project_coverage(pid: str, run: str | None = None) -> dict:
+    cov = pj.get_coverage(pid, run)
+    if not cov:
+        raise HTTPException(404, "no coverage run yet")
+    return cov
+
 
 @api.get("/catalog/domains")
 def catalog_domains() -> dict:

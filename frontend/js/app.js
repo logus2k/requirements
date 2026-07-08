@@ -621,55 +621,33 @@
   const rulesP = fetch('rules').then(r => r.ok ? r.json() : {}).catch(() => ({}));
 
   // ---- boot: pick data mode ----
-  const projectId = new URLSearchParams(location.search).get('project');
+  const reveal = () => { document.body.style.visibility = 'visible'; };   // undo the pre-render hide
+  const projectId = new URLSearchParams(location.search).get('project')
+    || (() => { try { return localStorage.getItem('reqoach-project'); } catch (e) { return null; } })();
   if (window.SCORECARD) {                      // single-document inlined build
+    reveal();
     rulesP.then(m => { RULES = m || {}; showOnly(window.SCORECARD.source_file); loadScorecard(window.SCORECARD); });
-  } else if (projectId) {                      // projects mode: this project's latest Quality run
-    const dp = document.getElementById('docpick'); if (dp) dp.style.display = 'none';
+  } else if (projectId) {                      // projects mode: pick among this project's Quality runs
+    reveal();
     const P = encodeURIComponent(projectId);
     rulesP.then(m => { RULES = m || {};
       return fetch('projects/' + P + '/quality').then(r => r.ok ? r.json() : { runs: [] }); })
-      .then(d => { if (!d.runs || !d.runs.length) { showNoRun(); return null; }   // no run yet — avoid a 404
-        return fetch('projects/' + P + '/quality/scorecard').then(r => r.json()); })
-      .then(sc => { if (sc) loadScorecard(sc); })
-      .catch(() => showNoRun());
-  } else {                                     // multi-document mode
-    // The picker merges two sources: curated static scorecards under data/, and
-    // documents assessed live through the orchestration API (GET documents ->
-    // GET documents/{id}/scorecard). Option values are tagged "static:<file>" or
-    // "api:<doc_id>" so the loader knows where to fetch from. Either source may
-    // be absent (e.g. a static-only deploy, or the API unreachable) — we merge
-    // whatever loads.
-    const loadDoc = value => {
-      const i = value.indexOf(':'), src = value.slice(0, i), id = value.slice(i + 1);
-      const url = src === 'api' ? 'documents/' + id + '/scorecard' : 'data/' + id;
-      return fetch(url)
-        .then(r => { if (!r.ok) throw new Error(r.status + ' ' + id); return r.json(); })
-        .then(loadScorecard)
-        .catch(e => { showOnly('failed to load ' + id); console.error(e); });
-    };
-
-    const staticP = fetch('data/index.json')
-      .then(r => r.ok ? r.json() : [])
-      .then(d => Array.isArray(d) ? d : []).catch(() => []);
-    const apiP = fetch('documents')
-      .then(r => r.ok ? r.json() : { documents: [] })
-      .then(d => (d && d.documents) || []).catch(() => []);
-
-    Promise.all([staticP, apiP, rulesP]).then(([statics, apis, rmeta]) => {
-      RULES = rmeta || {};
-      const opts = statics.map(d => ({ value: 'static:' + d.file, name: d.name }));
-      for (const d of apis) {
-        if (!d.total) continue;                // skip empty/failed jobs
-        opts.push({ value: 'api:' + d.doc_id, name: d.source_file + ' · ' + d.total });
-      }
-      if (!opts.length) { showOnly('no documents'); return; }
-      // Deep-link: ?doc=<doc_id> (from the monitor's "open full report") pre-selects
-      // that assessed document; otherwise show the first.
-      const want = new URLSearchParams(location.search).get('doc');
-      const startVal = (want && opts.find(o => o.value === 'api:' + want) || opts[0]).value;
-      setDocOptions(opts, startVal, loadDoc);
-      loadDoc(startVal);
-    });
+      .then(d => {
+        const runs = (d.runs || []).slice().sort((a, b) => (b.finished_at || '').localeCompare(a.finished_at || ''));
+        if (!runs.length) {                    // no quality run yet — hide the picker, show the prompt
+          const dp = document.getElementById('docpick'); if (dp) dp.style.display = 'none';
+          showNoRun(); return;
+        }
+        // The header picker now switches between the project's quality runs (reports).
+        const opts = runs.map(r => ({ value: r.run_id, name: (r.source_file || 'run') + (r.total ? ' · ' + r.total : '') }));
+        const want = new URLSearchParams(location.search).get('run');
+        const startVal = (want && opts.find(o => o.value === want) || opts[0]).value;
+        const loadRun = rid => fetch('projects/' + P + '/quality/scorecard?run=' + encodeURIComponent(rid))
+          .then(r => r.json()).then(loadScorecard).catch(() => showNoRun());
+        setDocOptions(opts, startVal, loadRun);
+        loadRun(startVal);
+      }).catch(() => showNoRun());
+  } else {                                     // projects mode: no project selected -> the switcher
+    location.replace('projects.html');         // body stays hidden -> no dashboard flash
   }
 })();
