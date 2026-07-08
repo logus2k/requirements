@@ -130,31 +130,42 @@ def _aggregates(records: list[dict]) -> dict:
 
 
 def _score_and_assemble(records: list[dict], opts: JobOptions,
-                        client: AgentServerClient, t0: float, head: dict) -> Iterator[dict]:
+                        client: AgentServerClient, t0: float, head: dict,
+                        should_cancel=None) -> Iterator[dict]:
     """Score (req × 9 judges) → review defectives → set-level → aggregates → scorecard.
     Shared by the single-document (`iter_job`) and project (`iter_project_job`) runs.
-    `head` seeds the scorecard (e.g. `source_file`, `documents`)."""
+    `head` seeds the scorecard (e.g. `source_file`, `documents`). `should_cancel` is an
+    optional zero-arg predicate polled between items so a long run can be aborted; when it
+    trips, in-flight judges are left to drain and queued ones are cancelled, and the run
+    ends with a `cancelled` event (no scorecard)."""
+    cancelled = lambda: bool(should_cancel and should_cancel())  # noqa: E731
     n = len(records)
     total_tasks = n * len(CHARACTERISTICS)
     remaining = [len(CHARACTERISTICS)] * n
     yield {"type": "stage", "stage": "score", "status": "start", "done": 0, "total": total_tasks}
 
     completed_reqs = 0
-    done_tasks = 0
-    with ThreadPoolExecutor(max_workers=opts.workers) as ex:
+    ex = ThreadPoolExecutor(max_workers=opts.workers)
+    try:
         fut_meta = {ex.submit(_judge, client, cid, suffix, records[i]["text"]): (i, cid)
                     for i in range(n)
                     for cid, suffix, _ in CHARACTERISTICS}
         for fut in as_completed(fut_meta):
+            if cancelled():
+                break
             i, cid = fut_meta[fut]
             records[i]["characteristics"][cid] = fut.result()
-            done_tasks += 1
             remaining[i] -= 1
             if remaining[i] == 0:
                 _finalize_scores(records[i])
                 completed_reqs += 1
                 rec = {k: v for k, v in records[i].items() if k != "_order"}
                 yield {"type": "requirement", "data": rec, "scored": completed_reqs, "total": n}
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+    if cancelled():
+        yield {"type": "cancelled", "stage": "score"}
+        return
     yield {"type": "stage", "stage": "score", "status": "done",
            "done": total_tasks, "total": total_tasks, "message": f"{n} requirements scored"}
 
@@ -162,22 +173,33 @@ def _score_and_assemble(records: list[dict], opts: JobOptions,
         to_review = [i for i in range(n) if _needs_review(records[i])]
         yield {"type": "stage", "stage": "review", "status": "start", "done": 0, "total": len(to_review)}
         reviewed = 0
-        with ThreadPoolExecutor(max_workers=opts.workers) as ex:
+        ex = ThreadPoolExecutor(max_workers=opts.workers)
+        try:
             fut_i = {ex.submit(_review, client, records[i]["text"],
                                [records[i]["characteristics"][c] for c, _, _ in CHARACTERISTICS],
                                records[i]["deterministic_findings"]): i
                      for i in to_review}
             for fut in as_completed(fut_i):
+                if cancelled():
+                    break
                 i = fut_i[fut]
                 records[i]["review"] = fut.result()
                 reviewed += 1
                 yield {"type": "review_result", "req_id": records[i]["req_id"],
                        "data": records[i]["review"], "done": reviewed, "total": len(to_review)}
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
+        if cancelled():
+            yield {"type": "cancelled", "stage": "review"}
+            return
         yield {"type": "stage", "stage": "review", "status": "done",
                "done": len(to_review), "total": len(to_review)}
 
     set_block = {"overlaps": [], "set_assessment": []}
     if opts.set_level:
+        if cancelled():
+            yield {"type": "cancelled", "stage": "set_level"}
+            return
         yield {"type": "stage", "stage": "set_level", "status": "start"}
         set_block = assess_set([{"id": r["req_id"], "text": r["text"]} for r in records], client=client)
         yield {"type": "set_level", "data": set_block}
@@ -199,7 +221,8 @@ def _score_and_assemble(records: list[dict], opts: JobOptions,
 
 def iter_project_job(docs: list[dict], source_file: str,
                      options: JobOptions | None = None,
-                     client: AgentServerClient | None = None) -> Iterator[dict]:
+                     client: AgentServerClient | None = None,
+                     should_cancel=None) -> Iterator[dict]:
     """Project (multi-document) quality run. Ingest+segment+gate EACH document,
     tag every requirement with its source document (traceability), merge, then
     score the combined set — set-level (overlaps/C10–C15) runs across ALL documents.
@@ -211,8 +234,14 @@ def iter_project_job(docs: list[dict], source_file: str,
     seen: dict[str, int] = {}                       # req_id collisions across documents
 
     yield {"type": "stage", "stage": "ingest", "status": "start", "total": len(docs)}
+    total_pages = 0
     for di, d in enumerate(docs):
+        if should_cancel and should_cancel():
+            yield {"type": "cancelled", "stage": "ingest"}
+            return
         items = _ingest(d["path"])
+        pages = max((it.page or 0 for it in items), default=0)
+        total_pages += pages
         reqs_all = segment_items(items, client=client)
         primaries = [r for r in reqs_all if r.duplicate_of is None]
         src_by_order = {it.order: it.text for it in items}
@@ -232,20 +261,20 @@ def iter_project_job(docs: list[dict], source_file: str,
             rec["_order"] = di * 100000 + (rec.get("_order") or 0)
             records.append(rec)
         yield {"type": "stage", "stage": "ingest", "status": "progress",
-               "done": di + 1, "total": len(docs),
-               "message": f"{d['source_file']}: {len(accepted)} accepted"}
+               "done": di + 1, "total": len(docs), "pages": total_pages,
+               "message": f"{d['source_file']}: {pages} page(s) → {len(accepted)} requirements"}
     yield {"type": "stage", "stage": "ingest", "status": "done",
-           "done": len(docs), "total": len(docs),
-           "message": f"{len(records)} requirements from {len(docs)} document(s)"}
+           "done": len(docs), "total": len(docs), "pages": total_pages,
+           "message": f"{len(records)} requirements from {len(docs)} document(s), {total_pages} page(s)"}
 
     head = {"source_file": source_file,
             "documents": [{"document_id": d["document_id"], "filename": d["source_file"]} for d in docs]}
-    yield from _score_and_assemble(records, opts, client, t0, head)
+    yield from _score_and_assemble(records, opts, client, t0, head, should_cancel=should_cancel)
 
 
 def iter_job(path: str, options: JobOptions | None = None,
              client: AgentServerClient | None = None,
-             source_file: str | None = None) -> Iterator[dict]:
+             source_file: str | None = None, should_cancel=None) -> Iterator[dict]:
     """Run the full pipeline for one document, yielding events as it goes.
 
     `source_file` is the display name recorded in the scorecard (the original
@@ -282,7 +311,8 @@ def iter_job(path: str, options: JobOptions | None = None,
 
     # 4-7. Score → review → set-level → scorecard (shared with the project run).
     records = [_record(r) for r in accepted]
-    yield from _score_and_assemble(records, opts, client, t0, {"source_file": source_file})
+    yield from _score_and_assemble(records, opts, client, t0, {"source_file": source_file},
+                                   should_cancel=should_cancel)
 
 
 def run_job(path: str, emit: Callable[[dict], None] | None = None,

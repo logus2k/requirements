@@ -34,6 +34,7 @@ import asyncio
 import json
 import os
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -55,6 +56,10 @@ _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 STORE = os.environ.get("REQQA_STORE", os.path.join(_REPO, "store"))
 _FRONTEND = os.path.join(_REPO, "frontend")
 
+# What the "done/total" of each stage counts — used to label the progress readout.
+_STAGE_UNIT = {"ingest": "documents", "score": "requirements", "review": "requirements",
+               "judges": "domains"}
+
 
 @dataclass
 class Job:
@@ -69,12 +74,16 @@ class Job:
     project_id: str | None = None   # set for project (multi-doc) runs
     run_id: str | None = None       # == job_id for project runs
     kind: str = "document"          # document | quality (project)
+    started_at: float | None = None  # wall-clock when the job began running
+    cancel_event: threading.Event = field(default_factory=threading.Event)
 
     def snapshot(self) -> dict:
         return {"job_id": self.job_id, "doc_id": self.doc_id,
                 "source_file": self.source_file, "status": self.status,
                 "stage": self.stage, "progress": self.progress, "error": self.error,
                 "project_id": self.project_id, "run_id": self.run_id, "kind": self.kind,
+                "elapsed_s": (round(time.time() - self.started_at)
+                              if self.started_at else None),
                 "event_count": len(self.events)}
 
 
@@ -92,11 +101,33 @@ class JobManager:
 
     def _emit(self, job: Job, event: dict) -> None:
         job.events.append(event)
-        # keep a light status snapshot in sync for polling clients
-        if event.get("type") == "stage":
+        # Keep a light status snapshot in sync for POLLING clients (the pipeline
+        # Overview polls /jobs/{id}; it does not use socket.io). `stage` events mark
+        # phase boundaries; the fine-grained per-item events (`requirement`, `domain`,
+        # `review_result`) carry the live counts that make a 30-min run legible, so
+        # fold those into `job.progress` too — otherwise the snapshot looks frozen.
+        et = event.get("type")
+        if et == "stage":
             job.stage = event.get("stage")
-            job.progress = {"done": event.get("done"), "total": event.get("total"),
-                            "status": event.get("status")}
+            job.progress = {"stage": event.get("stage"), "done": event.get("done"),
+                            "total": event.get("total"), "status": event.get("status"),
+                            "message": event.get("message"), "pages": event.get("pages"),
+                            "unit": _STAGE_UNIT.get(event.get("stage"))}
+        elif et == "requirement":     # scoring: one per requirement finished
+            job.stage = "score"
+            job.progress = {"stage": "score", "done": event.get("scored"),
+                            "total": event.get("total"), "status": "progress",
+                            "unit": "requirements"}
+        elif et == "review_result":   # reviewer pass over flagged requirements
+            job.stage = "review"
+            job.progress = {"stage": "review", "done": event.get("done"),
+                            "total": event.get("total"), "status": "progress",
+                            "unit": "requirements"}
+        elif et == "domain":          # coverage: one per domain judge finished
+            job.stage = "judges"
+            job.progress = {"stage": "judges", "done": event.get("done"),
+                            "total": event.get("total"), "status": "progress",
+                            "unit": "domains"}
         if self._loop is not None:
             asyncio.run_coroutine_threadsafe(
                 self.sio.emit(event["type"], {**event, "job_id": job.job_id},
@@ -104,14 +135,20 @@ class JobManager:
 
     def _run(self, job: Job, path: str, options: JobOptions) -> None:
         job.status = "running"
+        job.started_at = time.time()
         self._emit(job, {"type": "stage", "stage": "queued", "status": "done"})
         try:
-            for event in iter_job(path, options=options, source_file=job.source_file):
+            for event in iter_job(path, options=options, source_file=job.source_file,
+                                  should_cancel=job.cancel_event.is_set):
                 self._emit(job, event)
                 if event.get("type") == "scorecard":
                     self._persist_scorecard(job, event["data"])
-            job.status = "done"
-            self._emit(job, {"type": "job_done", "doc_id": job.doc_id})
+            if job.cancel_event.is_set():
+                job.status = "cancelled"
+                self._emit(job, {"type": "job_cancelled", "doc_id": job.doc_id})
+            else:
+                job.status = "done"
+                self._emit(job, {"type": "job_done", "doc_id": job.doc_id})
         except Exception as e:  # noqa: BLE001 — surface any pipeline failure
             job.status = "error"
             job.error = f"{type(e).__name__}: {e}"
@@ -142,14 +179,20 @@ class JobManager:
     def _run_project(self, job: Job, docs: list[dict], source_file: str,
                      options: JobOptions) -> None:
         job.status = "running"
+        job.started_at = time.time()
         self._emit(job, {"type": "stage", "stage": "queued", "status": "done"})
         try:
-            for event in iter_project_job(docs, source_file, options=options):
+            for event in iter_project_job(docs, source_file, options=options,
+                                          should_cancel=job.cancel_event.is_set):
                 self._emit(job, event)
                 if event.get("type") == "scorecard":
                     self._persist_project_scorecard(job, event["data"])
-            job.status = "done"
-            self._emit(job, {"type": "job_done", "project_id": job.project_id, "run_id": job.run_id})
+            if job.cancel_event.is_set():
+                job.status = "cancelled"
+                self._emit(job, {"type": "job_cancelled", "project_id": job.project_id, "run_id": job.run_id})
+            else:
+                job.status = "done"
+                self._emit(job, {"type": "job_done", "project_id": job.project_id, "run_id": job.run_id})
         except Exception as e:  # noqa: BLE001
             job.status = "error"
             job.error = f"{type(e).__name__}: {e}"
@@ -175,9 +218,11 @@ class JobManager:
     # --- coverage (domain-judge panel) runs ---
     def _run_coverage(self, job: Job) -> None:
         job.status = "running"
+        job.started_at = time.time()
         self._emit(job, {"type": "stage", "stage": "queued", "status": "done"})
         try:
-            for event in coverage.iter_coverage_for_project(job.project_id):
+            for event in coverage.iter_coverage_for_project(
+                    job.project_id, should_cancel=job.cancel_event.is_set):
                 self._emit(job, event)
                 if event.get("type") == "coverage":
                     meta = {"run_id": job.run_id, "project_id": job.project_id, "kind": "coverage",
@@ -185,12 +230,24 @@ class JobManager:
                             "requirement_count": event["data"].get("requirement_count"),
                             "gap_count": len(event["data"].get("gaps", []))}
                     pj.save_coverage_run(job.project_id, job.run_id, event["data"], meta)
-            job.status = "done"
-            self._emit(job, {"type": "job_done", "project_id": job.project_id, "run_id": job.run_id})
+            if job.cancel_event.is_set():
+                job.status = "cancelled"
+                self._emit(job, {"type": "job_cancelled", "project_id": job.project_id, "run_id": job.run_id})
+            else:
+                job.status = "done"
+                self._emit(job, {"type": "job_done", "project_id": job.project_id, "run_id": job.run_id})
         except Exception as e:  # noqa: BLE001
             job.status = "error"
             job.error = f"{type(e).__name__}: {e}"
             self._emit(job, {"type": "job_error", "message": job.error})
+
+    def cancel(self, job_id: str) -> bool:
+        """Signal a running job to abort (cooperative — checked between items)."""
+        job = self.jobs.get(job_id)
+        if not job or job.status not in ("queued", "running"):
+            return False
+        job.cancel_event.set()
+        return True
 
     def create_coverage_run(self, pid: str) -> Job:
         job = Job(job_id=uuid.uuid4().hex, doc_id="", source_file="")
@@ -287,6 +344,16 @@ def job_events(job_id: str) -> dict:
     if not job:
         raise HTTPException(404, "unknown job")
     return {"job_id": job_id, "status": job.status, "events": job.events}
+
+
+@api.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    """Cooperatively abort a running job (quality or coverage). In-flight LLM calls
+    finish; queued ones are dropped, so the run stops within ~one judge latency."""
+    if job_id not in jm.jobs:
+        raise HTTPException(404, "unknown job")
+    ok = jm.cancel(job_id)
+    return {"job_id": job_id, "cancelling": ok, "status": jm.jobs[job_id].status}
 
 
 @api.get("/documents")
@@ -527,6 +594,16 @@ def run_project_coverage(pid: str) -> JSONResponse:
     return JSONResponse(status_code=202,
                         content={"job_id": job.job_id, "run_id": job.run_id,
                                  "project_id": pid, "status": job.status})
+
+
+@api.get("/projects/{pid}/active-job")
+def project_active_job(pid: str) -> dict:
+    """The newest still-running (queued/running) job for this project, if any — so a
+    reloaded Overview can reattach to a run in progress instead of looking idle."""
+    for job in reversed(list(jm.jobs.values())):
+        if job.project_id == pid and job.status in ("queued", "running"):
+            return {"job_id": job.job_id, "kind": job.kind, "status": job.status}
+    return {"job_id": None}
 
 
 @api.get("/projects/{pid}/coverage")

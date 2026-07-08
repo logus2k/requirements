@@ -97,9 +97,11 @@ def _domain_input(dom: dict, prof_archetypes: list[str], archetypes: dict,
     return "\n".join(lines)
 
 
-def iter_coverage_for_project(pid: str, client: AgentServerClient | None = None) -> Iterator[dict]:
+def iter_coverage_for_project(pid: str, client: AgentServerClient | None = None,
+                              should_cancel=None) -> Iterator[dict]:
     """Run the coverage domain-judge panel over a project; yield progress events and a
-    final `coverage` event. Judges run in parallel; each domain emits as it completes."""
+    final `coverage` event. Judges run in parallel; each domain emits as it completes.
+    `should_cancel` is an optional zero-arg predicate polled between domains for abort."""
     client = client or AgentServerClient()
     domains = framing.load_domains().get("domains", [])
     archetypes = {a["id"]: a for a in framing.load_archetypes()}
@@ -131,15 +133,23 @@ def iter_coverage_for_project(pid: str, client: AgentServerClient | None = None)
         return idx, out
 
     done = 0
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    ex = ThreadPoolExecutor(max_workers=8)
+    try:
         futs = {ex.submit(judge, i, d): i for i, d in enumerate(domains)}
         for f in as_completed(futs):
+            if should_cancel and should_cancel():
+                break
             idx, out = f.result()
             results[idx] = out
             done += 1
             yield {"type": "domain", "data": {"id": out["id"], "coverage": out.get("coverage"),
                                               "gaps": len(out.get("gaps", []))},
                    "done": done, "total": len(domains)}
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+    if should_cancel and should_cancel():
+        yield {"type": "cancelled", "stage": "judges"}
+        return
     yield {"type": "stage", "stage": "judges", "status": "done",
            "done": len(domains), "total": len(domains)}
 

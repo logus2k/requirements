@@ -57,6 +57,18 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   .node .run:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}
   .node .link{color:var(--accent);font-size:12px;text-decoration:none;font-weight:600}
   .node .link:hover{text-decoration:underline}
+  .node .abort{border:1px solid var(--s1);background:transparent;color:var(--s1);
+    border-radius:8px;padding:5px 11px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+  .node .abort:hover{background:color-mix(in srgb,var(--s1) 12%,transparent)}
+  .node .abort:disabled{opacity:.5;cursor:default}
+
+  /* in-node live progress */
+  .prog{margin-top:4px;display:flex;flex-direction:column;gap:5px}
+  .pstage{font-size:12px;font-weight:600;color:var(--run)}
+  .pbar{height:6px;border-radius:4px;background:var(--panel2);overflow:hidden}
+  .pbar span{display:block;height:100%;background:var(--run);border-radius:4px;transition:width .45s ease}
+  .pcount{font-size:11.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
+  .pmsg{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .node .badge{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
     border-radius:5px;padding:1px 7px}
   .badge.ratified{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
@@ -84,6 +96,10 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   .runall{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:10px;
     padding:11px 20px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px}
   .runall:hover{filter:brightness(1.06)} .runall:disabled{opacity:.5;cursor:not-allowed;filter:none}
+  .abortall{border:1px solid var(--s1);background:transparent;color:var(--s1);border-radius:10px;
+    padding:11px 18px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+  .abortall:hover{background:color-mix(in srgb,var(--s1) 12%,transparent)}
+  .abortall:disabled{opacity:.5;cursor:default}
 
   .note{background:var(--surface);border:1px solid var(--border);border-radius:11px;
     padding:14px 17px;color:var(--ink2);font-size:13px;line-height:1.6;max-width:820px}
@@ -98,7 +114,10 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
 <main>
   <div class="rail">
     <div class="hint">Run the whole pipeline, or run one stage at a time — each stage unlocks once the ones before it have run.</div>
-    <button class="runall" id="runAll" style="margin-left:auto" disabled><span>▶</span> Run All</button>
+    <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+      <button class="abortall" id="abortAll" style="display:none">■ Abort</button>
+      <button class="runall" id="runAll" disabled><span>▶</span> Run All</button>
+    </div>
   </div>
 
   <div class="pipe" id="pipe"></div>
@@ -123,10 +142,24 @@ const STAGES = [
   { key: 'coverage',  name: 'Coverage',         desc: '16-domain judge panel — are the requirements enough?' },
 ];
 
-let STATE = {};   // { documents:{done,info,when}, framing:{done,ratified,when}, quality:{done,when}, coverage:{done,when} }
+let STATE = {};   // per-stage {done,…} + transient _running/_prog/_stage/_jobId/_runStartMs/_stageStartMs
 let busy = false;
+let ticker = null;
 
 function log(msg) { $('log').textContent = msg || ''; }
+
+// Friendly names for the pipeline sub-stages the backend emits.
+const STAGE_LABEL = {
+  queued: 'Queued', framing: 'Distilling problem statement',
+  ingest: 'Reading documents', segment: 'Segmenting requirements',
+  gate: 'Filtering non-requirements', score: 'Assessing requirements',
+  review: 'Reviewing flagged requirements', set_level: 'Set-level analysis',
+  requirements: 'Gathering requirements', judges: 'Domain-expert judges', synthesis: 'Synthesising findings',
+};
+function fmtDur(s) {
+  s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${ss}s` : `${ss}s`;
+}
 
 async function loadState() {
   const [proj, ps] = await Promise.all([
@@ -147,6 +180,14 @@ async function loadState() {
   };
   $('psub').textContent = pipelineSummary();
   render();
+
+  // If a run is already in flight (e.g. the page was reloaded mid-run), reattach to it
+  // so the live progress + Abort come back instead of the run looking idle.
+  if (!busy) {
+    const aj = await fetch('projects/' + encodeURIComponent(pid) + '/active-job')
+      .then(r => r.ok ? r.json() : {}).catch(() => ({}));
+    if (aj && aj.job_id) reattach(aj);
+  }
 }
 
 function pipelineSummary() {
@@ -168,23 +209,31 @@ function render() {
     parts.push(nodeHTML(s, i));
   });
   $('pipe').innerHTML = parts.join('');
-  // wire per-node run buttons
-  STAGES.forEach((s, i) => {
-    const b = document.getElementById('run-' + s.key);
-    if (b) b.addEventListener('click', () => runStage(s.key));
+  // wire per-node run + abort buttons
+  STAGES.forEach(s => {
+    const rb = document.getElementById('run-' + s.key);
+    if (rb) rb.addEventListener('click', () => runStage(s.key));
+    const ab = document.getElementById('abort-' + s.key);
+    if (ab) ab.addEventListener('click', () => abortStage(s.key));
   });
-  const firstIncomplete = STAGES.findIndex(s => !STATE[s.key].done);
-  $('runAll').disabled = busy || !STATE.documents.done || firstIncomplete === -1 && false;
-  $('runAll').innerHTML = firstIncomplete === -1 ? '<span>↻</span> Re-run All' : '<span>▶</span> Run All';
+  // fill progress for any running node (persisted across the full re-render)
+  STAGES.forEach(s => { if (STATE[s.key] && STATE[s.key]._running) renderProg(s.key); });
+  const allDone = STAGES.every(s => STATE[s.key].done);
+  $('runAll').disabled = busy || !STATE.documents.done;
+  $('runAll').innerHTML = allDone ? '<span>↻</span> Re-run All' : '<span>▶</span> Run All';
+  $('abortAll').style.display = busy ? '' : 'none';
 }
 
 function nodeHTML(s, i) {
   const st = STATE[s.key] || {};
   const enabled = enabledIndex(i);
-  const cls = busy ? (st._running ? 'running' : (st.done ? 'done' : 'locked'))
-                   : (st.done ? 'done' : (enabled ? 'ready' : 'locked'));
-  let stateLine, action = '';
-  if (st._running) { stateLine = `<span class="dot"></span>Running…`; }
+  const cls = st._running ? 'running' : (st.done ? 'done' : (enabled ? 'ready' : 'locked'));
+  let stateLine, action = '', prog = '';
+  if (st._running) {
+    stateLine = `<span class="dot"></span>Running…`;
+    prog = `<div class="prog" id="prog-${s.key}"></div>`;
+    action = s.key === 'framing' ? '' : `<button class="abort" id="abort-${s.key}">Abort</button>`;
+  }
   else if (st.done) {
     const extra = s.key === 'framing'
       ? `<span class="badge ${st.ratified ? 'ratified' : 'draft'}">${st.ratified ? 'ratified' : 'draft'}</span>`
@@ -202,6 +251,7 @@ function nodeHTML(s, i) {
     <div class="top"><span class="idx">${i + 1}</span><span class="name">${esc(s.name)}</span></div>
     <div class="desc">${esc(s.desc)}</div>
     <div class="state">${stateLine}</div>
+    ${prog}
     <div class="act">${action}</div>
   </div>`;
 }
@@ -218,17 +268,53 @@ function actionLinks(s, done) {
     return `<a class="link" href="documents.html${Q}">${done ? 'Manage documents →' : 'Upload documents →'}</a>`;
   }
   const runLabel = done ? 'Re-run' : 'Run';
-  return `<button class="run" id="run-${s.key}">${runLabel}</button>` + (done ? view : '');
+  return `<button class="run" id="run-${s.key}" ${busy ? 'disabled' : ''}>${runLabel}</button>` + (done ? view : '');
 }
+
+// ---- live progress readout inside a running node ----
+function applySnapshot(key, s) {
+  const st = STATE[key]; if (!st) return;
+  const p = s.progress || {};
+  const stage = p.stage || s.stage || '';
+  if (stage && st._stage !== stage) { st._stage = stage; st._stageStartMs = Date.now(); }  // reset ETA baseline per stage
+  st._prog = p; st._elapsed = s.elapsed_s;
+  renderProg(key);
+}
+
+function renderProg(key) {
+  const el = document.getElementById('prog-' + key); if (!el) return;
+  const st = STATE[key], p = st._prog || {}, stage = st._stage || '';
+  const label = STAGE_LABEL[stage] || (stage || 'Working…');
+  const elapsedS = st._runStartMs ? (Date.now() - st._runStartMs) / 1000 : (st._elapsed || 0);
+  let html = `<div class="pstage">${esc(label)}${elapsedS ? ` · ${fmtDur(elapsedS)} elapsed` : ''}</div>`;
+  const done = p.done, total = p.total;
+  // On a stage-"start" tick the count is not yet meaningful (e.g. score reports the
+  // task total = reqs×9, not requirements) — wait for the first real progress tick.
+  if (p.status !== 'start' && typeof total === 'number' && total > 0 && typeof done === 'number') {
+    const pct = Math.min(100, Math.round(done / total * 100));
+    html += `<div class="pbar"><span style="width:${pct}%"></span></div>`;
+    let line = `${done} / ${total}${p.unit ? ' ' + p.unit : ''} · ${pct}%`;
+    const stageMs = st._stageStartMs ? (Date.now() - st._stageStartMs) : 0;
+    if (done > 0 && total > done && stageMs > 4000) line += ` · ~${fmtDur(stageMs / 1000 / done * (total - done))} left`;
+    else if (done > 0 && total > done) line += ' · estimating…';
+    html += `<div class="pcount">${line}</div>`;
+  }
+  if (p.message) html += `<div class="pmsg">${esc(p.message)}</div>`;
+  el.innerHTML = html;
+}
+
+function startTicker() { if (!ticker) ticker = setInterval(() => STAGES.forEach(s => { if (STATE[s.key] && STATE[s.key]._running) renderProg(s.key); }), 500); }
+function stopTicker() { if (ticker) { clearInterval(ticker); ticker = null; } }
 
 // ---- job polling (quality + coverage share the /jobs/{id} snapshot) ----
 function pollJob(jobId, onStage) {
   return new Promise((resolve, reject) => {
     const t = setInterval(async () => {
-      const s = await fetch('jobs/' + jobId).then(r => r.json()).catch(() => null);
+      const s = await fetch('jobs/' + jobId).then(r => r.ok ? r.json() : null).catch(() => null);
       if (!s) return;
-      if (onStage && s.stage) onStage(s);
+      if (onStage) onStage(s);
       if (s.status === 'done') { clearInterval(t); resolve(s); }
+      else if (s.status === 'cancelled') { clearInterval(t); resolve({ cancelled: true }); }
       else if (s.status === 'error') { clearInterval(t); reject(new Error(s.error || 'job failed')); }
     }, 1500);
   });
@@ -245,47 +331,82 @@ async function frame(autoAccept) {
   }
 }
 
-async function runOne(key, onStage) {
-  if (key === 'framing') { await frame(false); return; }
+// Run one stage; returns the final snapshot ({cancelled:true} if aborted).
+async function runOne(key) {
+  STATE[key]._runStartMs = Date.now();
+  if (key === 'framing') { STATE[key]._stage = 'framing'; renderProg(key); await frame(false); return {}; }
   const path = key === 'quality' ? '/quality:run' : '/coverage:run';
   const res = await fetch('projects/' + encodeURIComponent(pid) + path, { method: 'POST' }).then(r => r.json());
   if (!res.job_id) throw new Error('could not start ' + key);
-  await pollJob(res.job_id, onStage);
+  STATE[key]._jobId = res.job_id;
+  return await pollJob(res.job_id, s => applySnapshot(key, s));
 }
 
 async function runStage(key) {
   if (busy) return;
-  busy = true; STATE[key]._running = true; render();
+  resetAbortAll();
+  busy = true; STATE[key]._running = true; startTicker(); render();
   const label = STAGES.find(s => s.key === key).name;
   log('Running ' + label + '…');
   try {
-    await runOne(key, s => log(label + ': ' + (s.stage || '') + (s.progress && s.progress.total ? ` (${s.progress.done || 0}/${s.progress.total})` : '')));
-    log(label + ' complete.');
+    const r = await runOne(key);
+    log(r && r.cancelled ? label + ' aborted.' : label + ' complete.');
   } catch (e) { log('✗ ' + label + ' failed: ' + e.message); alert(label + ' failed:\n' + e.message); }
-  finally { busy = false; if (STATE[key]) STATE[key]._running = false; await loadState(); }
+  finally { busy = false; stopTicker(); if (STATE[key]) STATE[key]._running = false; await loadState(); }
 }
 
 async function runAll() {
   if (busy) return;
   if (!STATE.documents.done) { alert('Upload at least one document first.'); return; }
-  busy = true; render();
+  resetAbortAll();
+  busy = true; startTicker(); render();
   try {
     // Framing (auto-accepted) → Quality → Coverage, in order.
-    STATE.framing._running = true; render(); log('Framing the problem…');
-    await frame(true);
+    STATE.framing._running = true; STATE.framing._runStartMs = Date.now(); STATE.framing._stage = 'framing';
+    render(); log('Framing the problem…');
+    await frame(true);                                        // generate + auto-accept in one step
     STATE.framing._running = false; STATE.framing.done = true;
 
     STATE.quality._running = true; render(); log('Running Quality…');
-    await runOne('quality', s => log('Quality: ' + (s.stage || '') + (s.progress && s.progress.total ? ` (${s.progress.done || 0}/${s.progress.total})` : '')));
-    STATE.quality._running = false; STATE.quality.done = true;
+    let r = await runOne('quality');
+    STATE.quality._running = false;
+    if (r && r.cancelled) { log('Pipeline aborted during Quality.'); return; }
+    STATE.quality.done = true;
 
     STATE.coverage._running = true; render(); log('Running Coverage…');
-    await runOne('coverage', s => log('Coverage: ' + (s.stage || '') + (s.progress && s.progress.total ? ` (${s.progress.done || 0}/${s.progress.total})` : '')));
-    log('Pipeline complete.');
+    r = await runOne('coverage');
+    STATE.coverage._running = false;
+    log(r && r.cancelled ? 'Pipeline aborted during Coverage.' : 'Pipeline complete.');
   } catch (e) { log('✗ Run All stopped: ' + e.message); alert('Run All stopped:\n' + e.message); }
-  finally { busy = false; ['framing', 'quality', 'coverage'].forEach(k => STATE[k] && (STATE[k]._running = false)); await loadState(); }
+  finally { busy = false; stopTicker(); ['framing', 'quality', 'coverage'].forEach(k => STATE[k] && (STATE[k]._running = false)); await loadState(); }
 }
 
+// Reattach to a job already running server-side (page reloaded mid-run).
+function reattach(aj) {
+  const key = aj.kind === 'coverage' ? 'coverage' : 'quality';
+  busy = true; STATE[key]._running = true; STATE[key]._jobId = aj.job_id; startTicker(); render();
+  log('Reattached to a running ' + STAGES.find(s => s.key === key).name + ' job…');
+  const finish = async () => { busy = false; stopTicker(); if (STATE[key]) STATE[key]._running = false; await loadState(); };
+  pollJob(aj.job_id, s => applySnapshot(key, s))
+    .then(r => { log(r && r.cancelled ? key + ' aborted.' : key + ' complete.'); return finish(); })
+    .catch(e => { log('✗ ' + key + ' failed: ' + e.message); return finish(); });
+}
+
+async function abortStage(key) {
+  const st = STATE[key]; if (!st || !st._jobId) return;
+  const b = document.getElementById('abort-' + key); if (b) { b.disabled = true; b.textContent = 'Aborting…'; }
+  try { await fetch('jobs/' + st._jobId + '/cancel', { method: 'POST' }); log('Aborting… (finishing in-flight work)'); } catch (e) {}
+}
+
+async function abortAll() {
+  const b = $('abortAll'); if (b) { b.disabled = true; b.textContent = '■ Aborting…'; }
+  const running = STAGES.find(s => STATE[s.key] && STATE[s.key]._running && STATE[s.key]._jobId);
+  if (running) { try { await fetch('jobs/' + STATE[running.key]._jobId + '/cancel', { method: 'POST' }); } catch (e) {} }
+  log('Aborting… (finishing in-flight work)');
+}
+function resetAbortAll() { const b = $('abortAll'); if (b) { b.disabled = false; b.textContent = '■ Abort'; } }
+
 $('runAll').addEventListener('click', runAll);
+$('abortAll').addEventListener('click', abortAll);
 loadState().catch(() => location.replace('projects.html'));
 </script>
