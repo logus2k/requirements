@@ -256,6 +256,43 @@ class JobManager:
         threading.Thread(target=self._run_coverage, args=(job,), daemon=True).start()
         return job
 
+    # --- problem framing (streamed) runs ---
+    def _run_framing(self, job: Job, user_request: str) -> None:
+        job.status = "running"
+        job.started_at = time.time()
+        self._emit(job, {"type": "stage", "stage": "queued", "status": "done"})
+        try:
+            paths = [p for d in pj.list_documents(job.project_id)
+                     if (p := pj.document_path(job.project_id, d["id"]))]
+            for event in framing.iter_frame_problem(paths, user_request,
+                                                    should_cancel=job.cancel_event.is_set):
+                self._emit(job, event)
+                if event.get("type") == "problem_statement":
+                    st = event["data"]
+                    pj.save_problem_statement(job.project_id, st, ratified=False)
+                    if not pj.get_coverage_profile(job.project_id):   # seed from framing output
+                        pj.save_coverage_profile(job.project_id,
+                                                 {"archetypes": st.get("candidate_archetypes", []),
+                                                  "salient_domains": st.get("salient_domains", []),
+                                                  "domain_overrides": {}})
+            if job.cancel_event.is_set():
+                job.status = "cancelled"
+                self._emit(job, {"type": "job_cancelled", "project_id": job.project_id, "run_id": job.run_id})
+            else:
+                job.status = "done"
+                self._emit(job, {"type": "job_done", "project_id": job.project_id, "run_id": job.run_id})
+        except Exception as e:  # noqa: BLE001
+            job.status = "error"
+            job.error = f"{type(e).__name__}: {e}"
+            self._emit(job, {"type": "job_error", "message": job.error})
+
+    def create_framing_run(self, pid: str, user_request: str = "") -> Job:
+        job = Job(job_id=uuid.uuid4().hex, doc_id="", source_file="")
+        job.project_id, job.run_id, job.kind = pid, job.job_id, "framing"
+        self.jobs[job.job_id] = job
+        threading.Thread(target=self._run_framing, args=(job, user_request), daemon=True).start()
+        return job
+
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 api = FastAPI(title="reqoach")
@@ -558,6 +595,20 @@ def generate_problem_statement(pid: str, payload: dict | None = None) -> dict:
                                        "salient_domains": statement.get("salient_domains", []),
                                        "domain_overrides": {}})
     return doc
+
+
+@api.post("/projects/{pid}/framing:run")
+def run_project_framing(pid: str, payload: dict | None = None) -> JSONResponse:
+    """Streamed Problem Framing (async job): reads the documents (with page counts) then
+    distils the problem statement, saved as an unratified draft. Progress + abort via /jobs."""
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    if not pj.list_documents(pid):
+        raise HTTPException(400, "no documents to frame")
+    job = jm.create_framing_run(pid, (payload or {}).get("user_request", ""))
+    return JSONResponse(status_code=202,
+                        content={"job_id": job.job_id, "run_id": job.run_id,
+                                 "project_id": pid, "status": job.status})
 
 
 @api.get("/projects/{pid}/problem-statement")

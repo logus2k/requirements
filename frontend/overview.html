@@ -236,7 +236,7 @@ function nodeHTML(s, i) {
   if (st._running) {
     stateLine = `<span class="dot"></span>Running…`;
     prog = `<div class="prog" id="prog-${s.key}"></div>`;
-    action = s.key === 'framing' ? '' : `<button class="abort" id="abort-${s.key}">Abort</button>`;
+    action = `<button class="abort" id="abort-${s.key}">Abort</button>`;
   }
   else if (st.done) {
     const extra = s.key === 'framing'
@@ -324,22 +324,21 @@ function pollJob(jobId, onStage) {
   });
 }
 
-async function frame(autoAccept) {
-  const doc = await fetch('projects/' + encodeURIComponent(pid) + '/problem-statement:generate',
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-    .then(r => r.ok ? r.json() : Promise.reject(new Error('framing failed')));
-  if (autoAccept && doc && doc.statement) {
+// Auto-accept (ratify) the current problem statement — used by Run All after framing.
+async function ratifyCurrent() {
+  const ps = await fetch('projects/' + encodeURIComponent(pid) + '/problem-statement')
+    .then(r => r.ok ? r.json() : null).catch(() => null);
+  if (ps && ps.statement) {
     await fetch('projects/' + encodeURIComponent(pid) + '/problem-statement',
       { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ statement: doc.statement, ratified: true }) });
+        body: JSON.stringify({ statement: ps.statement, ratified: true }) });
   }
 }
 
-// Run one stage; returns the final snapshot ({cancelled:true} if aborted).
+// Run one stage as a streamed job; returns the final snapshot ({cancelled:true} if aborted).
 async function runOne(key) {
   STATE[key]._runStartMs = Date.now();
-  if (key === 'framing') { STATE[key]._stage = 'framing'; renderProg(key); await frame(false); return {}; }
-  const path = key === 'quality' ? '/quality:run' : '/coverage:run';
+  const path = key === 'framing' ? '/framing:run' : key === 'quality' ? '/quality:run' : '/coverage:run';
   const res = await fetch('projects/' + encodeURIComponent(pid) + path, { method: 'POST' }).then(r => r.json());
   if (!res.job_id) throw new Error('could not start ' + key);
   STATE[key]._jobId = res.job_id;
@@ -365,11 +364,13 @@ async function runAll() {
   resetAbortAll();
   busy = true; startTicker(); render();
   try {
-    // Framing (auto-accepted) → Quality → Coverage, in order.
-    STATE.framing._running = true; STATE.framing._runStartMs = Date.now(); STATE.framing._stage = 'framing';
-    render(); log('Framing the problem…');
-    await frame(true);                                        // generate + auto-accept in one step
-    STATE.framing._running = false; STATE.framing.done = true;
+    // Framing (streamed job, then auto-accepted) → Quality → Coverage, in order.
+    STATE.framing._running = true; render(); log('Framing the problem…');
+    let rf = await runOne('framing');
+    STATE.framing._running = false;
+    if (rf && rf.cancelled) { log('Pipeline aborted during Framing.'); return; }
+    await ratifyCurrent();                                    // auto-accept the generated statement
+    STATE.framing.done = true;
 
     STATE.quality._running = true; render(); log('Running Quality…');
     let r = await runOne('quality');
@@ -387,7 +388,7 @@ async function runAll() {
 
 // Reattach to a job already running server-side (page reloaded mid-run).
 function reattach(aj) {
-  const key = aj.kind === 'coverage' ? 'coverage' : 'quality';
+  const key = aj.kind === 'coverage' ? 'coverage' : aj.kind === 'framing' ? 'framing' : 'quality';
   busy = true; STATE[key]._running = true; STATE[key]._jobId = aj.job_id; startTicker(); render();
   log('Reattached to a running ' + STAGES.find(s => s.key === key).name + ' job…');
   const finish = async () => { busy = false; stopTicker(); if (STATE[key]) STATE[key]._running = false; await loadState(); };
