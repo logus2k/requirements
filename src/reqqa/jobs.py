@@ -233,18 +233,31 @@ def iter_project_job(docs: list[dict], source_file: str,
     records: list[dict] = []
     seen: dict[str, int] = {}                       # req_id collisions across documents
 
-    yield {"type": "stage", "stage": "ingest", "status": "start", "total": len(docs)}
+    # Ingest → segment → gate emit as DISTINCT stages (like the single-doc run) so a long
+    # pre-scoring phase shows what it's doing ("Reading documents" → "Segmenting" →
+    # "Filtering") instead of one silent "Reading documents". Docling ingest and the
+    # segment/gate batch calls have no per-item hook, so these phases show a label +
+    # elapsed (no bar); scoring keeps its real per-requirement bar + ETA.
+    ndocs = len(docs)
     total_pages = 0
     for di, d in enumerate(docs):
+        dn = d["source_file"]
+        pre = f"document {di + 1}/{ndocs}: {dn} — " if ndocs > 1 else ""
         if should_cancel and should_cancel():
             yield {"type": "cancelled", "stage": "ingest"}
             return
+        yield {"type": "stage", "stage": "ingest", "status": "start",
+               "message": f"{pre}reading{'' if ndocs > 1 else ' ' + dn}…".strip()}
         items = _ingest(d["path"])
         pages = max((it.page or 0 for it in items), default=0)
         total_pages += pages
+        yield {"type": "stage", "stage": "segment", "status": "start",
+               "message": f"{pre}{pages} page(s) read — identifying requirements…"}
         reqs_all = segment_items(items, client=client)
         primaries = [r for r in reqs_all if r.duplicate_of is None]
         src_by_order = {it.order: it.text for it in items}
+        yield {"type": "stage", "stage": "gate", "status": "start",
+               "message": f"{pre}{len(primaries)} candidate(s) — filtering non-requirements…"}
         gated = gate_requirements(primaries, src_by_order, client=client)
         accepted = [g.requirement for g in gated if g.disposition == ACCEPTED]
         for r in accepted:
@@ -260,12 +273,10 @@ def iter_project_job(docs: list[dict], source_file: str,
             rec["provenance"]["source_document"] = d["source_file"]
             rec["_order"] = di * 100000 + (rec.get("_order") or 0)
             records.append(rec)
-        yield {"type": "stage", "stage": "ingest", "status": "progress",
-               "done": di + 1, "total": len(docs), "pages": total_pages,
-               "message": f"{d['source_file']}: {pages} page(s) → {len(accepted)} requirements"}
-    yield {"type": "stage", "stage": "ingest", "status": "done",
-           "done": len(docs), "total": len(docs), "pages": total_pages,
-           "message": f"{len(records)} requirements from {len(docs)} document(s), {total_pages} page(s)"}
+    # Per-document completion is implicit in the stage transitions above; this closes the
+    # pre-scoring phase with a summary (kept on the last stage label to avoid a bar flash).
+    yield {"type": "stage", "stage": "gate", "status": "done", "pages": total_pages,
+           "message": f"{len(records)} requirement(s) from {ndocs} document(s), {total_pages} page(s)"}
 
     head = {"source_file": source_file,
             "documents": [{"document_id": d["document_id"], "filename": d["source_file"]} for d in docs]}

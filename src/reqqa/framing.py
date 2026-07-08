@@ -51,17 +51,62 @@ def gather_text(doc_paths: list[str], limit: int = 24000) -> str:
     return ("\n\n---\n\n".join(x for x in parts if x))[:limit]
 
 
-def frame_problem(doc_paths: list[str], user_request: str = "",
-                  client: AgentServerClient | None = None) -> dict:
-    """Return the structured problem statement (the raw preset output)."""
+def iter_frame_problem(doc_paths: list[str], user_request: str = "",
+                       client: AgentServerClient | None = None,
+                       should_cancel=None, limit: int = 24000):
+    """Streamed framing: yields stage events (reading documents — with page counts —
+    then distilling) and a final `problem_statement` event. `should_cancel` is polled
+    between documents / before the LLM call for abort. `frame_problem` wraps this for
+    synchronous callers."""
     client = client or AgentServerClient()
+    cancelled = lambda: bool(should_cancel and should_cancel())  # noqa: E731
+
+    yield {"type": "stage", "stage": "ingest", "status": "start", "total": len(doc_paths)}
+    parts, total_pages = [], 0
+    for di, p in enumerate(doc_paths):
+        if cancelled():
+            yield {"type": "cancelled", "stage": "ingest"}
+            return
+        try:
+            items = _ingest(p)
+            pages = max((it.page or 0 for it in items), default=0)
+            parts.append("\n".join(it.text for it in items))
+        except Exception:  # noqa: BLE001 — a bad doc shouldn't sink framing
+            pages = 0
+            parts.append("")
+        total_pages += pages
+        yield {"type": "stage", "stage": "ingest", "status": "progress",
+               "done": di + 1, "total": len(doc_paths), "pages": total_pages,
+               "message": f"{os.path.basename(p)}: {pages} page(s)"}
+    yield {"type": "stage", "stage": "ingest", "status": "done",
+           "done": len(doc_paths), "total": len(doc_paths), "pages": total_pages,
+           "message": f"{len(doc_paths)} document(s), {total_pages} page(s)"}
+
+    if cancelled():
+        yield {"type": "cancelled", "stage": "framing"}
+        return
+    text = ("\n\n---\n\n".join(x for x in parts if x))[:limit]
+    yield {"type": "stage", "stage": "framing", "status": "start"}
     body = (
         f"ARCHETYPES:\n{archetype_menu()}\n\n"
         f"COVERAGE DOMAINS:\n{domain_menu()}\n\n"
-        f"INPUT DOCUMENTS:\n{gather_text(doc_paths) or '(none)'}\n\n"
+        f"INPUT DOCUMENTS:\n{text or '(none)'}\n\n"
         f"USER REQUEST:\n{user_request or '(none)'}"
     )
-    return client.complete_json("problem_framing", body)
+    statement = client.complete_json("problem_framing", body)
+    yield {"type": "stage", "stage": "framing", "status": "done"}
+    yield {"type": "problem_statement", "data": statement}
+
+
+def frame_problem(doc_paths: list[str], user_request: str = "",
+                  client: AgentServerClient | None = None) -> dict:
+    """Return the structured problem statement (the raw preset output). Synchronous
+    wrapper over `iter_frame_problem` — used by the sync `:generate` endpoint."""
+    statement: dict = {}
+    for ev in iter_frame_problem(doc_paths, user_request, client=client):
+        if ev.get("type") == "problem_statement":
+            statement = ev["data"]
+    return statement
 
 
 # ---- catalog reads (for the API / UI) ----
