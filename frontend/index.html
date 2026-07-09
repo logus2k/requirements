@@ -172,8 +172,7 @@
   .rcat{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 2px;font-weight:600}
   .rcat:first-child{margin-top:0}
   .rfind{border:1px solid var(--grid);border-radius:8px;padding:8px 10px;margin:6px 0;transition:box-shadow .12s}
-  .rfind.det{border-left:3px solid var(--accent)}
-  .rfind.llm{border-left:3px dashed var(--axis)}
+  /* deterministic vs judge-flagged is shown by the top-right label; no redundant left border */
   .rfind.active{box-shadow:0 0 0 2px var(--accent)}
   .rfind .rtop{display:flex;align-items:baseline;gap:8px}
   .rfind .rid{font-weight:600} .rfind .rnm{color:var(--ink2)}
@@ -193,7 +192,10 @@
   .linkbtn{border:none;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;font-weight:600}
   .linkbtn:hover{text-decoration:underline}
   /* Tabs: Dashboard | Overlaps | Set-level (no sliding panels) */
-  .tabbar{flex:none;display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--border);background:var(--surface)}
+  .tabbar{flex:none;display:flex;align-items:center;gap:2px;padding:0 22px;border-bottom:1px solid var(--border);background:var(--surface)}
+  .tabbar .caret{margin-left:auto}                              /* push the chart toggle to the right */
+  /* the chart toggle only applies to the Dashboard tab's chart row */
+  body[data-tab="overlaps"] .tabbar .caret, body[data-tab="setlevel"] .tabbar .caret{display:none}
   .tabbtn{background:none;border:none;padding:11px 15px;color:var(--muted);font:inherit;font-size:13.5px;
     font-weight:600;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .tabbtn:hover{color:var(--ink)} .tabbtn.active{color:var(--ink);border-bottom-color:var(--accent)}
@@ -232,12 +234,12 @@
     <div class="health"><div class="n" id="ruleconf"></div><div class="l">rule conformance</div></div>
     <div class="health"><div class="n" id="health"></div><div class="l">avg quality / 5</div></div>
   </div>
-  <button class="caret" id="chartsToggle" title="Collapse / expand the chart row"></button>
 </header>
 <div class="tabbar" id="tabbar">
   <button class="tabbtn active" data-tab="dashboard">Dashboard</button>
   <button class="tabbtn" data-tab="overlaps">Overlaps</button>
   <button class="tabbtn" data-tab="setlevel">Set-level</button>
+  <button class="caret" id="chartsToggle" title="Collapse / expand the chart row"></button>
 </div>
 <div class="norun" id="norun" hidden>No quality run yet for this project. Open <b>Documents</b> and click <b>▶ Run Quality</b>.</div>
 <div class="tabpane" id="tab-dashboard">
@@ -279,8 +281,8 @@
         <th data-key="overall">Avg<span class="ind"></span></th>
       </tr></thead><tbody id="reqrows"></tbody></table></div></div>
   </div>
-  <aside class="sugg-col" id="suggcol"><div id="suggBody"></div></aside>
   <aside class="detail-col" id="drawer"><div id="drawerBody"></div></aside>
+  <aside class="sugg-col" id="suggcol"><div id="suggBody"></div></aside>
 </div>
 </div><!-- /tab-dashboard -->
 <div class="tabpane" id="tab-overlaps" hidden><div id="ovBody"></div></div>

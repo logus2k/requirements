@@ -327,15 +327,17 @@
 
   function openDrawer(r) {
     openReq = r;
+    const rstats = reqRuleStats(r);                  // rule conformance + violation count
     document.getElementById('drawerBody').innerHTML = `
       <div class="detail-head">
-        <h3 style="display:flex;align-items:center;gap:10px;margin-top:0">${r.req_id}<span class="badge" style="background:${scoreColor(r.overall)};margin-left:auto">${(+r.overall).toFixed(2)}</span></h3>
-        <div class="muted" style="font-size:12px">${esc(provStr(r))}</div>
-        ${(() => { const s = reqRuleStats(r); return `<div class="muted" style="font-size:12px;margin-top:3px">Rule conformance ${confBadge(confPct(s.per))} · ${s.viol} violation${s.viol !== 1 ? 's' : ''}</div>`; })()}
+        <div style="display:flex;align-items:flex-start;gap:12px">
+          <h3 style="margin:0">${r.req_id}</h3>
+          <span class="muted" style="font-size:12px;margin-left:auto;text-align:right">${esc(provStr(r))}</span>
+        </div>
         <div class="rtext" id="rtext">${highlightText(r)}</div>
         <div class="dcharts">
-          <div class="col"><h4>Characteristics</h4><div id="reqRadar" style="height:200px;margin:2px 0"></div></div>
-          <div class="col"><h4>Rules</h4><div id="reqRuleRadar" style="height:200px;margin:2px 0"></div></div>
+          <div class="col"><h4>Characteristics<span class="badge" style="margin-left:auto;background:${scoreColor(r.overall)}">${(+r.overall).toFixed(2)}</span></h4><div id="reqRadar" style="height:200px;margin:2px 0"></div></div>
+          <div class="col"><h4>Rules<span class="meta">${rstats.viol} violation${rstats.viol !== 1 ? 's' : ''}</span>${confBadge(confPct(rstats.per))}</h4><div id="reqRuleRadar" style="height:200px;margin:2px 0"></div></div>
         </div>
       </div>
       <div class="detail-scroll">
@@ -431,35 +433,33 @@
   }
 
   // ---- rule-centric panel: a rule's guidance + every requirement that triggers it ----
+  // Rule-centric view rendered into the SUGGESTED IMPROVEMENTS column (right), so the
+  // requirement detail stays put in the middle. Picking a requirement — here or from the
+  // main table — returns the normal requirement detail + its suggestions.
   function openRulePanel(ruleId) {
-    if (drawerChart) { drawerChart.dispose(); drawerChart = null; }
-    if (drawerRuleChart) { drawerRuleChart.dispose(); drawerRuleChart = null; }
-    openReq = null;
+    disposeSuggCharts();                 // clear any requirement charts living in the sugg column
     const m = RULES[ruleId] || {};
     const detTerms = r => uniq((r.deterministic_findings || []).filter(f => f.rule_id === ruleId).flatMap(f => (f.matches || []).map(x => x.term)));
     const hits = D.requirements.filter(r => (r.deterministic_findings || []).some(f => f.rule_id === ruleId)
       || CHARS.some(c => (r.characteristics[c].rules_triggered || []).includes(ruleId)));
-    document.getElementById('drawerBody').innerHTML = `
-      <div class="detail-head">
-        <h3 style="margin-top:0">${ruleId} · ${esc(m.name || '')}</h3>
+    const el = document.getElementById('suggBody');
+    el.innerHTML = `
+      <div class="sreq">
+        <h3 style="margin:0 0 2px">${ruleId} · ${esc(m.name || '')}</h3>
         <div class="muted" style="font-size:12px">${esc(m.category || 'Other')}${m.detector ? ' · ' + esc(m.detector) : ''} · ${hits.length} requirement${hits.length !== 1 ? 's' : ''}</div>
         ${m.text ? `<div class="rtext">${esc(m.text)}</div>` : ''}
         ${(m.terms && m.terms.length) ? `<div class="terms" style="margin:8px 0 4px">${m.terms.slice(0, 40).map(t => `<span class="term">${esc(t)}</span>`).join('')}${m.terms.length > 40 ? ' <span class="muted">…</span>' : ''}</div>` : ''}
         <h4 style="margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Requirements (${hits.length})</h4>
-      </div>
-      <div class="panel-scroll">
-      ${hits.map(r => { const ts = detTerms(r); return `
-        <div class="cchar rclick" data-req="${esc(r.req_id)}"><div class="top">
-          <span class="rid">${esc(r.req_id)}</span>${badgeAvg(r.overall)}</div>
-          <div class="just">${esc(r.text.slice(0, 130))}${r.text.length > 130 ? '…' : ''}</div>
-          ${ts.length ? `<div class="terms">${ts.map(t => `<span class="term">${esc(t)}</span>`).join('')}</div>` : ''}</div>`; }).join('')}</div>`;
-    // Clicking a requirement opens its FULL detail in the Suggested Improvements column,
-    // leaving this rule panel in place so you can scan a rule's requirements side by side.
-    document.querySelectorAll('#drawerBody .rclick[data-req]').forEach(el =>
-      el.addEventListener('click', () => { const r = D.requirements.find(x => x.req_id === el.dataset.req); if (r) openReqInSugg(r); }));
-    selReqId = null;
-    renderSugg(null);
-    showDetail();
+        ${hits.map(r => { const ts = detTerms(r); return `
+          <div class="cchar rclick" data-req="${esc(r.req_id)}"><div class="top">
+            <span class="rid">${esc(r.req_id)}</span>${badgeAvg(r.overall)}</div>
+            <div class="just">${esc(r.text.slice(0, 130))}${r.text.length > 130 ? '…' : ''}</div>
+            ${ts.length ? `<div class="terms">${ts.map(t => `<span class="term">${esc(t)}</span>`).join('')}</div>` : ''}</div>`; }).join('')}
+      </div>`;
+    // Selecting a requirement here returns the normal requirement detail (middle) + its
+    // suggestions (right), replacing this rule panel — same as picking from the main table.
+    el.querySelectorAll('.rclick[data-req]').forEach(x =>
+      x.addEventListener('click', () => { const r = D.requirements.find(q => q.req_id === x.dataset.req); if (r) openDrawer(r); }));
   }
 
   // (Confirmed overlaps now live on their own page — overlaps.html, linked from the nav.)
@@ -504,6 +504,7 @@
     ['dashboard', 'overlaps', 'setlevel'].forEach(t =>
       document.getElementById('tab-' + t).hidden = t !== name);
     document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    document.body.dataset.tab = name;                 // drives which tab's controls (e.g. chart toggle) show
     if (name === 'dashboard') resizeCharts();
   }
 
@@ -534,7 +535,7 @@
     document.getElementById('tabbar').style.display = 'none';
     ['dashboard', 'overlaps', 'setlevel'].forEach(t => document.getElementById('tab-' + t).hidden = true);
     const hw = document.querySelector('.hwrap'); if (hw) hw.style.visibility = 'hidden';
-    const ct = document.getElementById('chartsToggle'); if (ct) ct.style.display = 'none';
+    // the chart toggle now lives inside the tabbar, which is hidden above — no separate hide needed
   }
 
   // ---- one-time wiring (independent of which document is loaded) ----
