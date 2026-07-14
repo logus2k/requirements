@@ -37,13 +37,20 @@
     // Current-project chip lives on the right, just before the theme toggle.
     `<a class="proj${pid ? "" : " none"}" href="projects.html" title="Switch / manage projects">` +
       (pid ? esc(pname || "project") : "Select project…") + "</a>" +
-    '<button class="tbtn" id="reqoach-theme" title="Toggle light / dark">◐ Theme</button>';
+    '<button class="tbtn tbtn-icon" id="reqoach-theme" title="Toggle light / dark" aria-label="Toggle light / dark"></button>';
   document.body.prepend(nav);
 
-  document.getElementById("reqoach-theme").addEventListener("click", () => {
+  const themeBtn = document.getElementById("reqoach-theme");
+  // Show the icon of the theme you'd switch TO: moon on light (go dark), sun on dark (go light).
+  const setThemeIcon = () => {
+    themeBtn.textContent = document.documentElement.dataset.theme === "dark" ? "☀︎" : "☾";
+  };
+  setThemeIcon();
+  themeBtn.addEventListener("click", () => {
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t;
     try { localStorage.setItem("reqoach-theme", t); } catch (e) {}
+    setThemeIcon();
     if (typeof window.reqoachRedraw === "function") window.reqoachRedraw();
     window.dispatchEvent(new CustomEvent("reqoach:theme", { detail: t }));
   });

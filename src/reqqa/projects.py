@@ -148,6 +148,71 @@ def get_quality_scorecard(pid: str, run_id: str | None = None) -> dict | None:
     return _read_json(os.path.join(_quality_dir(pid, run_id), "scorecard.json"))
 
 
+# ---- review sessions (Review & Reissue — one per quality run) ----
+
+_DEFAULT_THRESHOLD = {"mode": "avg_ge", "value": 4.3}
+
+
+def _review_dir(pid: str, run_id: str) -> str:
+    return os.path.join(_project_dir(pid), "reviews", run_id)
+
+
+def get_review(pid: str, run_id: str, seed: bool = True) -> dict | None:
+    """Read the review session for a quality run; if absent and `seed`, create it from
+    that run's scorecard (one entry per requirement, status=unreviewed)."""
+    path = os.path.join(_review_dir(pid, run_id), "review.json")
+    doc = _read_json(path)
+    if doc or not seed:
+        return doc
+    sc = get_quality_scorecard(pid, run_id)
+    if not sc:
+        return None
+    reqs: dict = {}
+    for r in sc.get("requirements", []):
+        rid = r.get("req_id")
+        if not rid:
+            continue
+        reqs[rid] = {"status": "unreviewed", "original_text": r.get("text", ""),
+                     "final_text": r.get("text", ""), "note": "",
+                     "overall_before": r.get("overall"), "overall_after": None,
+                     "reviewed_at": None}
+    doc = {"run_id": run_id, "project_id": pid, "threshold": dict(_DEFAULT_THRESHOLD),
+           "updated_at": _now(), "requirements": reqs}
+    _write_json(path, doc)
+    return doc
+
+
+def save_review(pid: str, run_id: str, doc: dict) -> dict:
+    doc["updated_at"] = _now()
+    _write_json(os.path.join(_review_dir(pid, run_id), "review.json"), doc)
+    return doc
+
+
+def upsert_req_review(pid: str, run_id: str, req_id: str, patch: dict) -> dict | None:
+    doc = get_review(pid, run_id)
+    if not doc or req_id not in doc.get("requirements", {}):
+        return None
+    entry = doc["requirements"][req_id]
+    for k in ("status", "final_text", "note", "overall_after"):
+        if k in patch:
+            entry[k] = patch[k]
+    entry["reviewed_at"] = _now()
+    save_review(pid, run_id, doc)
+    return entry
+
+
+def set_threshold(pid: str, run_id: str, threshold: dict) -> dict | None:
+    doc = get_review(pid, run_id)
+    if not doc:
+        return None
+    t = {"mode": threshold.get("mode", "avg_ge"), "value": float(threshold.get("value", 4.3))}
+    if "pct" in threshold:
+        t["pct"] = float(threshold["pct"])
+    doc["threshold"] = t
+    save_review(pid, run_id, doc)
+    return t
+
+
 # ---- problem statement & coverage profile (versioned, human-ratifiable) ----
 
 def get_problem_statement(pid: str) -> dict | None:

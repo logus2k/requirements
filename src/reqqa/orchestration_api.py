@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 import socketio
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from reqqa import coverage
@@ -534,6 +534,56 @@ def list_project_documents(pid: str) -> dict:
     if not pj.get_project(pid):
         raise HTTPException(404, "unknown project")
     return {"documents": pj.list_documents(pid)}
+
+
+# --- Review & Reissue (quality/correction loop). Review state is one session per quality run. ---
+
+@api.get("/projects/{pid}/reviews/{run}")
+def get_project_review(pid: str, run: str) -> dict:
+    """The review session for a quality run (seeded from its scorecard on first access)."""
+    if not pj.get_project(pid):
+        raise HTTPException(404, "unknown project")
+    doc = pj.get_review(pid, run)
+    if not doc:
+        raise HTTPException(404, "no such quality run to review")
+    return doc
+
+
+@api.put("/projects/{pid}/reviews/{run}/requirements/{req_id}")
+async def put_req_review(pid: str, run: str, req_id: str, payload: dict) -> dict:
+    """Upsert one requirement's review: {status, final_text, note, overall_after}."""
+    entry = pj.upsert_req_review(pid, run, req_id, payload or {})
+    if entry is None:
+        raise HTTPException(404, "unknown review session or requirement")
+    return entry
+
+
+@api.get("/projects/{pid}/reviews/{run}/threshold")
+def get_review_threshold(pid: str, run: str) -> dict:
+    doc = pj.get_review(pid, run)
+    if not doc:
+        raise HTTPException(404, "no review session")
+    return doc["threshold"]
+
+
+@api.put("/projects/{pid}/reviews/{run}/threshold")
+async def put_review_threshold(pid: str, run: str, payload: dict) -> dict:
+    t = pj.set_threshold(pid, run, payload or {})
+    if t is None:
+        raise HTTPException(404, "no review session")
+    return t
+
+
+@api.get("/projects/{pid}/documents/{did}/source")
+def get_document_source(pid: str, did: str):
+    """Serve a document's raw source file (e.g. the PDF) — used by the in-app PDF
+    viewer to render the page a requirement came from and highlight its bbox."""
+    import mimetypes
+    path = pj.document_path(pid, did)
+    if not path or not os.path.exists(path):
+        raise HTTPException(404, "document not found")
+    mt = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=mt)
 
 
 @api.post("/projects/{pid}/quality:run")
