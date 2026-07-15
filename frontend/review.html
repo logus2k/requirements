@@ -1,0 +1,331 @@
+<!-- Review & Reissue — the QUALITY/correction loop (M1 core). See specs/review_reissue/spec.md.
+     Reviewer walks each requirement, fixes it with live re-scoring (reuses the `assess` socket),
+     and persists per-requirement review state. Context tabs (Source PDF / Revised Spec) + the
+     threshold gauge + export arrive in M2–M4. Project-scoped: needs ?project=<pid>&run=<run>. -->
+<meta charset="utf-8">
+<title>Review · reqoach</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
+if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('reqoach-project'))location.replace('projects.html');</script>
+<link rel="stylesheet" href="css/nav.css">
+<style>
+  :root{
+    --surface:#fcfcfb; --plane:#e9e9e9; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+    --accent:#2a78d6; --s1:#d03b3b; --s2:#ec835a; --s3:#fab219; --s4:#6bbf59; --s5:#0ca30c;
+    --panel2:rgba(11,11,11,.05);
+  }
+  html[data-theme="dark"]{
+    --surface:#1a1a19; --plane:#0d0d0d; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+    --accent:#3987e5; --panel2:rgba(255,255,255,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--border)}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  header .sub{color:var(--muted);font-size:12.5px}
+  header .prog{margin-left:auto;color:var(--ink2);font-size:12.5px;font-variant-numeric:tabular-nums}
+  .badge{display:inline-block;min-width:26px;text-align:center;border-radius:6px;padding:1px 6px;
+    color:#fff;font-weight:700;font-size:12px;font-variant-numeric:tabular-nums}
+
+  .rev3{display:grid;grid-template-columns:300px 1fr 340px;gap:0;height:calc(100vh - 92px)}
+  .rev-nav,.rev-edit,.rev-ctx{overflow:auto;padding:14px 16px}
+  .rev-nav{border-right:1px solid var(--border);background:var(--surface)}
+  .rev-ctx{border-left:1px solid var(--border);background:var(--surface)}
+
+  .navfilter{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+  .navfilter button{border:1px solid var(--border);background:transparent;color:var(--ink2);border-radius:20px;
+    padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .navfilter button.on{border-color:var(--accent);color:var(--ink);background:var(--panel2)}
+  .navrow{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .navrow:hover{background:var(--panel2)}
+  .navrow.sel{border-color:var(--accent);background:var(--panel2)}
+  .navrow .dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--axis)}
+  .navrow.unreviewed .dot{background:var(--axis)}
+  .navrow.edited .dot{background:var(--accent)}
+  .navrow.accepted_fix .dot,.navrow.accepted_original .dot{background:var(--s5)}
+  .navrow.skipped .dot{background:var(--s3)}
+  .navrow .rid{font-weight:600;font-size:13px;flex:none}
+  .navrow .txt{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+  .navrow .sc{margin-left:auto}
+
+  .rev-edit{display:flex;flex-direction:column;gap:12px;max-width:900px;margin:0 auto;width:100%}
+  .edhead{display:flex;align-items:center;gap:10px}
+  .edhead h2{font-size:18px;margin:0}
+  .edhead .conf{margin-left:auto;font-size:12.5px;color:var(--ink2)}
+  textarea#reqtext{width:100%;min-height:110px;resize:vertical;background:var(--surface);color:var(--ink);
+    border:1px solid var(--border);border-radius:10px;padding:12px 14px;font:inherit;font-size:15px;line-height:1.5;outline:none}
+  textarea#reqtext:focus{border-color:var(--accent)}
+  .prov{color:var(--muted);font-size:12px;text-align:right}
+  .cchips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .cchip{display:flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:7px;padding:2px 7px;font-size:11.5px;color:var(--ink2)}
+  .cchip .sc{min-width:18px;text-align:center;border-radius:5px;color:#fff;font-weight:700;font-size:11px}
+  .cchip .sc.empty{background:var(--panel2);color:var(--muted)}
+  .jprog{color:var(--muted);font-size:11.5px;margin-left:4px}
+  h4.sec{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:6px 0 2px}
+  .rw{border:1px solid var(--grid);border-radius:9px;padding:9px 11px;margin:7px 0}
+  .rw.apply{cursor:pointer} .rw.apply:hover{border-color:var(--accent)}
+  .rw .txt{font-size:13.5px}
+  .rw .meta{color:var(--muted);font-size:12px;margin-top:3px}
+  .rw .applyhint{color:var(--accent)}
+  .rnone{color:var(--muted);font-size:13px;padding:6px 0}
+
+  .actbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:12px;margin-top:2px}
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;padding:8px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .btn:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--border)}
+  .btn.ghost:hover{border-color:var(--accent)}
+  .btn:disabled{opacity:.5;cursor:default;filter:none}
+  .actbar .nav{margin-left:auto;display:flex;gap:6px}
+
+  .ctxtabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin:-4px -4px 10px}
+  .ctxtabs button{background:none;border:none;border-bottom:2px solid transparent;padding:8px 12px;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
+  .ctxtabs button.on{color:var(--ink);border-bottom-color:var(--accent)}
+  .ctxstub{color:var(--muted);font-size:13px;padding:16px 4px}
+</style>
+
+<header>
+  <div><h1 id="ptitle">Review</h1><div class="sub" id="rsub"></div></div>
+  <div class="prog" id="hprog"></div>
+</header>
+<div class="rev3">
+  <aside class="rev-nav">
+    <div class="navfilter" id="navfilter">
+      <button data-f="all" class="on">All</button>
+      <button data-f="unreviewed">Unreviewed</button>
+      <button data-f="below">Below threshold</button>
+      <button data-f="done">Reviewed</button>
+    </div>
+    <div id="reqnav"></div>
+  </aside>
+
+  <main class="rev-edit" id="editpane">
+    <div class="rnone" id="editempty">Select a requirement to review.</div>
+    <div id="editbody" hidden>
+      <div class="edhead"><h2 id="edid">—</h2><span class="badge" id="edscore">—</span><span class="conf" id="edconf"></span></div>
+      <div class="prov" id="edprov"></div>
+      <textarea id="reqtext" spellcheck="false"></textarea>
+      <div class="cchips" id="cchips"></div>
+      <h4 class="sec">Suggested fixes</h4>
+      <div id="suggest"><div class="rnone">—</div></div>
+      <div class="actbar">
+        <button class="btn ghost" id="btnOrig" title="Revert to the original text and mark accepted">Accept original</button>
+        <button class="btn" id="btnSave" title="Save the current text as the correction">Save changes</button>
+        <button class="btn ghost" id="btnSkip" title="Skip this requirement">Skip</button>
+        <span class="nav">
+          <button class="btn ghost" id="btnPrev">‹ Prev</button>
+          <button class="btn ghost" id="btnNext">Next ›</button>
+        </span>
+      </div>
+    </div>
+  </main>
+
+  <aside class="rev-ctx">
+    <div class="ctxtabs">
+      <button class="on" data-ctx="pdf">Source PDF</button>
+      <button data-ctx="spec">Revised Spec</button>
+    </div>
+    <div class="ctxstub" id="ctxstub">Context views (source PDF with highlight, live revised-spec preview) arrive in M2.</div>
+  </aside>
+</div>
+
+<script src="vendor/socket.io.min.js"></script>
+<script src="js/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const q = new URLSearchParams(location.search);
+const pid = q.get('project') || localStorage.getItem('reqoach-project');
+let run = q.get('run') || null;
+if (!pid) location.replace('projects.html');
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const scoreColor = s => s == null ? cssVar('--muted') : cssVar('--s' + Math.max(1, Math.min(5, Math.round(s))));
+const CHARS = [['C1','Necessary'],['C2','Appropriate'],['C3','Unambiguous'],['C4','Complete'],
+  ['C5','Singular'],['C6','Feasible'],['C7','Verifiable'],['C8','Correct'],['C9','Conforming']];
+
+let REVIEW = null;          // review-state doc {threshold, requirements:{id:{status,final_text,...}}}
+let SC = {};                // scorecard requirement by id → {characteristics, overall, review, provenance, text}
+let ORDER = [];             // req_ids in scorecard order
+let curId = null;           // selected req_id
+let filter = 'all';
+let liveOverall = null;     // last live re-score of the current text (null until re-scored)
+let liveChars = {};         // live characteristic scores for the current text
+
+const scoreOf = id => {     // best-known score for a requirement (after-review if present, else before)
+  const e = REVIEW.requirements[id] || {};
+  return e.overall_after != null ? e.overall_after : e.overall_before;
+};
+const thVal = () => (REVIEW && REVIEW.threshold && REVIEW.threshold.value) || 4.3;
+
+async function boot() {
+  // resolve latest run if not given
+  if (!run) {
+    const runs = await fetch('projects/' + encodeURIComponent(pid) + '/quality').then(r => r.ok ? r.json() : {runs: []}).catch(() => ({runs: []}));
+    const rs = (runs.runs || []).slice().sort((a,b) => (b.finished_at||'').localeCompare(a.finished_at||''));
+    if (!rs.length) { $('editempty').textContent = 'No quality run to review yet.'; return; }
+    run = rs[0].run_id;
+  }
+  const [rev, sc, proj] = await Promise.all([
+    fetch(`projects/${pid}/reviews/${run}`).then(r => r.ok ? r.json() : Promise.reject('review')),
+    fetch(`projects/${pid}/quality/scorecard?run=${encodeURIComponent(run)}`).then(r => r.ok ? r.json() : {requirements: []}),
+    fetch('projects/' + encodeURIComponent(pid)).then(r => r.ok ? r.json() : {}),
+  ]);
+  REVIEW = rev;
+  ORDER = (sc.requirements || []).map(r => r.req_id);
+  for (const r of (sc.requirements || [])) SC[r.req_id] = r;
+  $('ptitle').textContent = (proj.name || 'Review');
+  $('rsub').textContent = 'reviewing ' + ORDER.length + ' requirements';
+  document.title = (proj.name || 'Review') + ' · reqoach';
+  renderNav(); updateProg();
+  const first = ORDER.find(id => (REVIEW.requirements[id] || {}).status === 'unreviewed') || ORDER[0];
+  if (first) select(first);
+}
+
+function belowThreshold(id) { const s = scoreOf(id); return s != null && s < thVal(); }
+
+function passesFilter(id) {
+  const st = (REVIEW.requirements[id] || {}).status;
+  if (filter === 'unreviewed') return st === 'unreviewed';
+  if (filter === 'done') return st && st !== 'unreviewed';
+  if (filter === 'below') return belowThreshold(id);
+  return true;
+}
+
+function renderNav() {
+  const el = $('reqnav');
+  const ids = ORDER.filter(passesFilter);
+  el.innerHTML = ids.map(id => {
+    const e = REVIEW.requirements[id] || {};
+    const s = scoreOf(id);
+    return `<div class="navrow ${e.status || 'unreviewed'} ${id === curId ? 'sel' : ''}" data-id="${esc(id)}">
+      <span class="dot"></span><span class="rid">${esc(id)}</span>
+      <span class="txt">${esc((e.final_text || '').slice(0, 60))}</span>
+      <span class="sc"><span class="badge" style="background:${scoreColor(s)}">${s == null ? '—' : (+s).toFixed(1)}</span></span></div>`;
+  }).join('') || '<div class="rnone">No requirements match this filter.</div>';
+  el.querySelectorAll('.navrow').forEach(r => r.addEventListener('click', () => select(r.dataset.id)));
+}
+
+function updateProg() {
+  const ids = ORDER;
+  const done = ids.filter(id => { const st = (REVIEW.requirements[id] || {}).status; return st && st !== 'unreviewed'; }).length;
+  const scores = ids.map(scoreOf).filter(s => s != null);
+  const avg = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : null;
+  const below = ids.filter(belowThreshold).length;
+  $('hprog').textContent = `${done}/${ids.length} reviewed · avg ${avg==null?'—':avg.toFixed(2)} (target ${thVal()}) · ${below} below`;
+}
+
+// ---- selection + editor ----
+function select(id) {
+  if (!id || !SC[id]) return;
+  // auto-save an in-progress edit before leaving (draft), per spec default
+  autosaveDraft();
+  curId = id; liveOverall = null; liveChars = {};
+  const e = REVIEW.requirements[id] || {};
+  const r = SC[id] || {};
+  $('editempty').hidden = true; $('editbody').hidden = false;
+  $('edid').textContent = id;
+  $('reqtext').value = e.final_text != null ? e.final_text : (r.text || '');
+  const p = r.provenance || {};
+  $('edprov').textContent = [p.source_document || p.source_file || '', p.section_path || '', p.page != null ? 'p.' + p.page : ''].filter(Boolean).join(' · ');
+  // initial score/chars/suggestions from the stored scorecard (no LLM call on mere navigation)
+  liveChars = {}; for (const [c] of CHARS) { const cc = (r.characteristics || {})[c]; if (cc && cc.score) liveChars[c] = cc.score; }
+  const initScore = e.overall_after != null ? e.overall_after : r.overall;
+  setScore(initScore); renderChips(''); renderSuggest(r.review);
+  renderNav();
+}
+
+function setScore(v) { const el = $('edscore'); el.textContent = v == null ? '—' : (+v).toFixed(2); el.style.background = scoreColor(v); }
+
+function renderChips(prog) {
+  $('cchips').innerHTML = CHARS.map(([c, name]) => {
+    const s = liveChars[c];
+    return `<span class="cchip" title="${esc(name)}">${c}<span class="sc ${s?'':'empty'}" style="${s?`background:${scoreColor(s)}`:''}">${s ? s : '·'}</span></span>`;
+  }).join('') + (prog ? `<span class="jprog">${esc(prog)}</span>` : '');
+}
+
+let lastRewrites = [];
+function renderSuggest(review) {
+  lastRewrites = (review && review.rewrites) || [];
+  const adv = (review && review.advisories) || [];
+  let h = lastRewrites.map((w, i) => `<div class="rw apply" data-rw="${i}">
+      <div class="txt">${esc(w.text || '')}</div>
+      <div class="meta">addresses ${(w.addresses||[]).join(', ')} — ${esc(w.notes||'')} · <b class="applyhint">apply →</b></div></div>`).join('');
+  h += adv.map(a => `<div class="rw"><div class="txt">${esc(a.characteristic||'')}: ${esc(a.issue||'')}</div><div class="meta">${esc(a.suggestion||'')}</div></div>`).join('');
+  $('suggest').innerHTML = h || '<div class="rnone">No suggestions — this requirement looks clean.</div>';
+}
+$('suggest').addEventListener('click', e => {
+  const card = e.target.closest('.rw.apply'); if (!card) return;
+  const w = lastRewrites[+card.dataset.rw]; if (w && w.text) { $('reqtext').value = w.text; $('reqtext').focus(); assessNow(); }
+});
+
+// ---- live re-score over the assess socket (only on edit / apply, not on navigation) ----
+const _base = location.pathname.replace(/[^/]*$/, '');
+const socket = io({ path: _base + 'socket.io' });
+let curGen = 0;
+function assessNow() {
+  const text = $('reqtext').value;
+  liveChars = {}; renderChips('assessing…'); setScore(null);
+  socket.emit('assess', { text });
+}
+socket.on('start', e => { curGen = e.gen; });
+socket.on('idle', () => { renderChips(''); setScore((REVIEW.requirements[curId] || {}).overall_before); });
+socket.on('characteristic', e => { if (e.gen !== curGen) return; if (e.data && e.data.id && e.data.score) liveChars[e.data.id] = e.data.score; renderChips(`judged ${e.i}/${e.n}`); });
+socket.on('review', e => { if (e.gen !== curGen) return; renderSuggest(e.data); });
+socket.on('done', e => { if (e.gen !== curGen) return; liveOverall = e.overall; setScore(e.overall); renderChips(''); });
+
+let typeTimer = null;
+$('reqtext').addEventListener('input', () => { clearTimeout(typeTimer); typeTimer = setTimeout(assessNow, 700); });
+
+// ---- persistence ----
+async function putReview(id, patch) {
+  const entry = await fetch(`projects/${pid}/reviews/${run}/requirements/${encodeURIComponent(id)}`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(r => r.ok ? r.json() : null);
+  if (entry) REVIEW.requirements[id] = entry;
+  renderNav(); updateProg();
+  return entry;
+}
+function curOverall() { return liveOverall != null ? liveOverall : (REVIEW.requirements[curId] || {}).overall_before; }
+
+// auto-save an edited-but-unsaved textarea as a draft (status 'edited') when leaving a requirement
+function autosaveDraft() {
+  if (!curId) return;
+  const e = REVIEW.requirements[curId] || {};
+  const text = $('reqtext') ? $('reqtext').value : null;
+  if (text == null) return;
+  if (text !== (e.final_text != null ? e.final_text : (SC[curId] || {}).text)) {
+    putReview(curId, { status: 'edited', final_text: text, overall_after: curOverall() });
+  }
+}
+
+$('btnOrig').addEventListener('click', async () => {
+  const orig = (REVIEW.requirements[curId] || {}).original_text != null ? REVIEW.requirements[curId].original_text : (SC[curId] || {}).text;
+  $('reqtext').value = orig || '';
+  await putReview(curId, { status: 'accepted_original', final_text: orig || '', overall_after: (REVIEW.requirements[curId] || {}).overall_before });
+  gotoNext();
+});
+$('btnSave').addEventListener('click', async () => {
+  await putReview(curId, { status: 'edited', final_text: $('reqtext').value, overall_after: curOverall() });
+  gotoNext();
+});
+$('btnSkip').addEventListener('click', async () => { await putReview(curId, { status: 'skipped' }); gotoNext(); });
+$('btnPrev').addEventListener('click', () => step(-1));
+$('btnNext').addEventListener('click', () => step(1));
+function step(d) {
+  const ids = ORDER.filter(passesFilter);
+  const i = ids.indexOf(curId);
+  const j = i < 0 ? 0 : Math.min(ids.length - 1, Math.max(0, i + d));
+  if (ids[j]) select(ids[j]);
+}
+function gotoNext() { step(1); }
+
+$('navfilter').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  filter = b.dataset.f;
+  $('navfilter').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  renderNav();
+});
+
+boot().catch(() => { $('editempty').textContent = 'Could not load this review.'; });
+</script>

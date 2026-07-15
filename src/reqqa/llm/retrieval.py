@@ -1,8 +1,9 @@
-"""Embedding + reranking access via the local llama-server.
+"""Embedding + reranking access via embeddings_server (torch GPU service).
 
-Embeddings (bge-m3) and reranking (bge-reranker) are served by llama-server
-(NOT agent_server) at LLAMA_SERVER_URL, OpenAI-style `/v1/embeddings` and the
-llama.cpp `/v1/rerank` endpoint. Mirrors noted-rag's rag_service.
+Embeddings (bge-m3) and reranking (bge-reranker) are served by embeddings_server
+at EMBEDDINGS_URL: the same llama.cpp-style `/v1/rerank` contract, and `/embed`
+(returns {"vectors": [...]}, already L2-normalized). Migrated off llama-server
+when the reranker moved to the consolidated GPU service.
 
 For overview-dedup we only need the reranker: raw cosine similarity does not
 separate a summary from a merely-related requirement in an SRS (everything is
@@ -16,8 +17,10 @@ import os
 
 import httpx
 
-LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "http://localhost:8500")
-EMBED_MODEL = os.environ.get("EMBED_MODEL_NAME", "bge-m3")
+# Embeddings + reranking now served by embeddings_server (torch GPU service),
+# not llama-server. Same /v1/rerank contract; /embed returns {"vectors": [...]}
+# (already L2-normalized). reqoach uses host networking -> localhost:8601.
+EMBEDDINGS_URL = os.environ.get("EMBEDDINGS_URL", "http://localhost:8601")
 RERANK_MODEL = os.environ.get("RERANK_MODEL_NAME", "bge-reranker")
 
 
@@ -37,7 +40,7 @@ def rerank(query: str, documents: list[str], timeout: float = 60.0) -> list[floa
     if not documents:
         return []
     r = httpx.post(
-        f"{LLAMA_SERVER_URL}/v1/rerank",
+        f"{EMBEDDINGS_URL}/v1/rerank",
         json={"model": RERANK_MODEL, "query": query, "documents": documents},
         timeout=timeout,
     )
@@ -59,17 +62,9 @@ def embed(texts: list[str], timeout: float = 120.0) -> list[list[float]]:
     if not texts:
         return []
     r = httpx.post(
-        f"{LLAMA_SERVER_URL}/v1/embeddings",
-        json={"model": EMBED_MODEL, "input": list(texts)},
+        f"{EMBEDDINGS_URL}/embed",
+        json={"texts": list(texts), "dense": True, "sparse": False},
         timeout=timeout,
     )
     r.raise_for_status()
-    entries = sorted(r.json().get("data", []), key=lambda e: int(e.get("index", 0)))
-    out: list[list[float]] = []
-    for e in entries:
-        v = e["embedding"]
-        if v and isinstance(v[0], (list, tuple)):
-            v = v[0]
-        n = math.sqrt(sum(x * x for x in v))
-        out.append([x / n for x in v] if n > 0 else list(v))
-    return out
+    return r.json().get("vectors", [])  # embeddings_server returns L2-normalized
