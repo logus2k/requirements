@@ -467,17 +467,30 @@ async def assess(sid, data):
             return next(gen_iter)
         except StopIteration:
             return sentinel
+        except Exception as e:               # a step that slipped past its own guard
+            return {"type": "__genfail__", "error": f"{type(e).__name__}: {e}"}
 
-    while True:
-        if _assess_gen.get(sid) != gen:      # superseded
-            gen_iter.close()
-            return
-        event = await loop.run_in_executor(None, _next)
-        if event is sentinel:
-            break
-        if _assess_gen.get(sid) != gen:
-            return
-        await sio.emit(event["type"], {**event, "gen": gen}, to=sid)
+    done_sent = False
+    try:
+        while True:
+            if _assess_gen.get(sid) != gen:      # superseded
+                gen_iter.close()
+                return
+            event = await loop.run_in_executor(None, _next)
+            if event is sentinel:
+                break
+            if _assess_gen.get(sid) != gen:
+                return
+            if event.get("type") == "__genfail__":
+                break                            # stop; the terminal 'done' below still fires
+            if event.get("type") == "done":
+                done_sent = True
+            await sio.emit(event["type"], {**event, "gen": gen}, to=sid)
+    finally:
+        gen_iter.close()
+    # ALWAYS deliver a terminal 'done' so the client's AVG SCORE never hangs on "—".
+    if not done_sent and _assess_gen.get(sid) == gen:
+        await sio.emit("done", {"gen": gen, "overall": None}, to=sid)
 
 
 # --- Projects mode (see specs/projects_mode/): project workspace + project-scoped

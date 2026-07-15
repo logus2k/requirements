@@ -56,8 +56,9 @@ def _judge(client: AgentServerClient, cid: str, suffix: str, text: str) -> dict:
             "evidence": a.get("evidence", ""),
             "justification": a.get("justification", ""),
         }
-    except (LLMError, KeyError, IndexError, TypeError) as e:
-        return {"id": cid, "score": None, "error": str(e)}
+    except Exception as e:  # noqa: BLE001 — contract: a judge NEVER raises (a transient timeout /
+        # JSON / connection error must not abort the stream and drop the terminal 'done').
+        return {"id": cid, "score": None, "error": f"{type(e).__name__}: {e}"}
 
 
 def _review(client: AgentServerClient, text: str, characteristics: list[dict],
@@ -77,8 +78,9 @@ def _review(client: AgentServerClient, text: str, characteristics: list[dict],
     try:
         r = client.complete_json("incose_reviewer", "\n".join(bundle))
         return {"rewrites": r.get("rewrites", []), "advisories": r.get("advisories", [])}
-    except LLMError as e:
-        return {"error": str(e)}
+    except Exception as e:  # noqa: BLE001 — review is the LAST step before 'done'; a failure here
+        # must NOT drop the terminal event (that's what left AVG SCORE stuck on "—").
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 def _overall(characteristics: list[dict]) -> float | None:
