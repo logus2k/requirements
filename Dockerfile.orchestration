@@ -1,30 +1,23 @@
-# reqoach single-container backend: static dashboard + editor + orchestration
-# API + socket.io (job progress AND live assess). Markdown is ingested in-process
-# here; PDF/DOCX/etc. are delegated to the separate Docling `ingest` service, so
-# this image stays slim (no torch/docling).
+# reqoach: the UI and nothing else.
+#
+# The analysis engine lives in the Analyst Agent (:7803) — this image serves the
+# static frontend and proxies every analysis call to it. It carries no engine
+# code, no INCOSE catalog and no store; those belong to the Analyst.
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Slim runtime deps only — the heavy Docling stack lives in the `ingest` image.
+# A static file server plus a proxy needs nothing more.
 RUN pip install --no-cache-dir \
         fastapi \
         "uvicorn[standard]" \
-        "python-socketio>=5.11" \
-        python-multipart \
-        httpx \
-        "markdown-it-py>=3.0"
+        httpx
 
-# App code + INCOSE catalog + the static frontend (all needed at their existing
-# relative paths: deterministic.py reads ../../../incose/catalog.json, and the
-# app serves ../../frontend).
 COPY src/ /app/src/
-COPY incose/ /app/incose/
 COPY frontend/ /app/frontend/
 
-ENV PYTHONPATH=/app/src \
-    REQQA_STORE=/app/store
+ENV PYTHONPATH=/app/src
 
 EXPOSE 7802
 
-CMD ["uvicorn", "reqqa.orchestration_api:asgi", "--host", "0.0.0.0", "--port", "7802"]
+CMD ["uvicorn", "reqqa.bff:app", "--host", "0.0.0.0", "--port", "7802"]

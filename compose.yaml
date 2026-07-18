@@ -1,50 +1,22 @@
 services:
-  ingest:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: reqqa-ingest:latest
-    restart: unless-stopped
-    ports:
-      - "5601:5601"
-    environment:
-      # Models are baked into the image at /opt/docling-models (see Dockerfile).
-      # OCR off by default; set to "1" to enable for scanned PDFs.
-      DOCLING_OCR: "0"
-    volumes:
-      # Live-mount source for iteration (remove for an immutable image).
-      - ./src:/app/src:ro
-    # GPU access via the NVIDIA container toolkit.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  # reqoach: single-container backend — serves the static dashboard + editor,
-  # the orchestration REST API, AND socket.io (job progress + live assess), all
-  # on one origin (host :7802). Replaces the old static-nginx `dashboard`.
-  # Markdown is ingested in-process; PDF/DOCX are delegated to `ingest` (:5601).
+  # reqoach: the frontend for the requirements pipeline — the dashboard, the Live
+  # Editor, the project pages. It runs a thin BFF (`reqqa.bff`) that serves those
+  # static pages and proxies every analysis call to the Analyst Agent (:7803), so
+  # the browser still talks to a single origin.
+  #
+  # reqoach holds NO analysis data: the store, the INCOSE catalog and the whole
+  # engine live in the Analyst. It is a consumer, exactly like the Architect.
   reqoach:
     build:
       context: .
       dockerfile: Dockerfile.orchestration
     image: reqqa-orchestration:latest
     restart: unless-stopped
-    # Host networking: binds host :7802 (nginx upstream) and reaches
-    # agent_server/llama-server/ingest on localhost with no rewiring.
+    # Host networking: binds host :7802 (the nginx upstream) and reaches the
+    # Analyst on localhost with no rewiring.
     network_mode: host
     environment:
-      AGENT_SERVER_URL: http://localhost:7701
-      LLAMA_SERVER_URL: http://localhost:8500
-      INGEST_URL: http://localhost:5601
-      REQQA_STORE: /app/store
+      ANALYST_URL: http://localhost:7803
     volumes:
-      - ./store:/app/store                       # persist jobs + scorecards
-      - ./frontend/data:/app/frontend/data:ro    # existing scorecards in the picker
-      - ./catalog:/app/catalog:ro                # coverage catalog (domains, archetypes, standard packs)
-
-volumes:
-  docling_cache:
+      # Legacy static scorecards still offered in the frontend's file picker.
+      - ./frontend/data:/app/frontend/data:ro
