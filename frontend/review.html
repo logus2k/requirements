@@ -30,10 +30,28 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   .badge{display:inline-block;min-width:26px;text-align:center;border-radius:6px;padding:1px 6px;
     color:#fff;font-weight:700;font-size:12px;font-variant-numeric:tabular-nums}
 
-  .rev3{display:grid;grid-template-columns:300px 1fr 340px;gap:0;height:calc(100vh - 92px)}
-  .rev-nav,.rev-edit,.rev-ctx{overflow:auto;padding:14px 16px}
+  /* Column widths are drag-resizable; the two `1px` tracks are the divider
+     handles. min-height:0 is what actually lets the columns scroll — without it
+     a grid child refuses to shrink below its content and overflows the page
+     instead of showing a scrollbar. */
+  .rev3{display:grid;
+    grid-template-columns:var(--navw,300px) 6px 1fr 6px var(--ctxw,340px);
+    gap:0;height:calc(100vh - 92px)}
+  .rev-nav,.rev-edit,.rev-ctx{overflow-y:scroll;overflow-x:hidden;min-height:0;padding:14px 16px}
   .rev-nav{border-right:1px solid var(--border);background:var(--surface)}
   .rev-ctx{border-left:1px solid var(--border);background:var(--surface)}
+  /* Always-visible slim scrollbars, so the list never looks un-scrollable
+     (desktop overlay scrollbars hide until interaction). */
+  .rev-nav::-webkit-scrollbar,.rev-edit::-webkit-scrollbar,.rev-ctx::-webkit-scrollbar{width:10px}
+  .rev-nav::-webkit-scrollbar-thumb,.rev-edit::-webkit-scrollbar-thumb,.rev-ctx::-webkit-scrollbar-thumb{
+    background:var(--border);border-radius:6px;border:2px solid var(--surface)}
+  .rev-nav::-webkit-scrollbar-thumb:hover,.rev-edit::-webkit-scrollbar-thumb:hover,.rev-ctx::-webkit-scrollbar-thumb:hover{background:var(--axis)}
+  /* Firefox: `auto` (not `thin`) so it never disables the wider WebKit bar above. */
+  .rev-nav,.rev-edit,.rev-ctx{scrollbar-color:var(--axis) transparent}
+  /* Drag handles between the columns. */
+  .rev-split{cursor:col-resize;background:transparent;position:relative}
+  .rev-split:hover,.rev-split.dragging{background:var(--accent)}
+  .rev-split::after{content:"";position:absolute;inset:0 -3px}  /* wider hit area */
 
   .navfilter{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
   .navfilter button{border:1px solid var(--border);background:transparent;color:var(--ink2);border-radius:20px;
@@ -84,11 +102,22 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   .ctxtabs button{background:none;border:none;border-bottom:2px solid transparent;padding:8px 12px;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
   .ctxtabs button.on{color:var(--ink);border-bottom-color:var(--accent)}
   .ctxstub{color:var(--muted);font-size:13px;padding:16px 4px}
+  .thctl{display:flex;align-items:center;gap:7px;margin-left:18px;color:var(--ink2);font-size:12.5px;white-space:nowrap}
+  .thctl input{width:58px;background:var(--surface);color:var(--ink);border:1px solid var(--border);
+    border-radius:7px;padding:4px 7px;font:inherit;font-size:13px;text-align:center;outline:none}
+  .thctl input:focus{border-color:var(--accent)}
+  .thsaved{color:var(--s5);font-size:12px;min-width:52px;opacity:0;transition:opacity .2s}
+  .thsaved.show{opacity:1}
 </style>
 
 <header>
   <div><h1 id="ptitle">Review</h1><div class="sub" id="rsub"></div></div>
   <div class="prog" id="hprog"></div>
+  <label class="thctl" title="Acceptance threshold for this project — requirements below it are not releasable">
+    Threshold
+    <input id="thInput" type="number" min="1" max="5" step="0.1" inputmode="decimal">
+    <span class="thsaved" id="thSaved"></span>
+  </label>
 </header>
 <div class="rev3">
   <aside class="rev-nav">
@@ -100,6 +129,8 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
     </div>
     <div id="reqnav"></div>
   </aside>
+
+  <div class="rev-split" id="splitL" title="Drag to resize"></div>
 
   <main class="rev-edit" id="editpane">
     <div class="rnone" id="editempty">Select a requirement to review.</div>
@@ -122,6 +153,8 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
     </div>
   </main>
 
+  <div class="rev-split" id="splitR" title="Drag to resize"></div>
+
   <aside class="rev-ctx">
     <div class="ctxtabs">
       <button class="on" data-ctx="pdf">Source PDF</button>
@@ -135,6 +168,53 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
 <script src="js/nav.js"></script>
 <script>
 const $ = id => document.getElementById(id);
+
+// --- resizable columns (list | editor | context) ---------------------------
+// Two drag handles update the grid's --navw / --ctxw widths; both persist so a
+// reviewer's preferred layout survives reloads. Widths are clamped so a column
+// can neither vanish nor crowd out the editor.
+(function initResizers() {
+  const root = document.documentElement;
+  const grid = document.querySelector('.rev3');
+  const NAV_MIN = 160, NAV_MAX = 620, CTX_MIN = 0, CTX_MAX = 640;
+  for (const [id, varName, min, max, sign] of [
+    ['splitL', '--navw', NAV_MIN, NAV_MAX, +1],   // drag right = wider list
+    ['splitR', '--ctxw', CTX_MIN, CTX_MAX, -1],   // drag right = narrower context
+  ]) {
+    const h = document.getElementById(id);
+    if (!h) continue;
+    const saved = localStorage.getItem('reqoach-review' + varName);
+    if (saved) root.style.setProperty(varName, saved + 'px');
+    let startX, startW;
+    const onMove = e => {
+      const delta = (e.clientX - startX) * sign;
+      const w = Math.max(min, Math.min(max, startW + delta));
+      root.style.setProperty(varName, w + 'px');
+    };
+    const onUp = () => {
+      h.classList.remove('dragging');
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      const cur = getComputedStyle(grid).getPropertyValue(
+        varName === '--navw' ? 'grid-template-columns' : 'grid-template-columns');
+      // read back the resolved px width of the relevant column
+      const cols = getComputedStyle(grid).gridTemplateColumns.split(' ');
+      const px = varName === '--navw' ? cols[0] : cols[cols.length - 1];
+      localStorage.setItem('reqoach-review' + varName, parseInt(px, 10));
+    };
+    h.addEventListener('pointerdown', e => {
+      startX = e.clientX;
+      const cols = getComputedStyle(grid).gridTemplateColumns.split(' ');
+      startW = parseInt(varName === '--navw' ? cols[0] : cols[cols.length - 1], 10);
+      h.classList.add('dragging');
+      h.setPointerCapture(e.pointerId);
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      e.preventDefault();
+    });
+  }
+})();
+
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const q = new URLSearchParams(location.search);
 const pid = q.get('project') || localStorage.getItem('reqoach-project');
@@ -152,6 +232,7 @@ let curId = null;           // selected req_id
 let filter = 'all';
 let liveOverall = null;     // last live re-score of the current text (null until re-scored)
 let liveChars = {};         // live characteristic scores for the current text
+let liveScoredText = null;  // the exact text the live scores belong to (guards a stale breakdown)
 
 const scoreOf = id => {     // best-known score for a requirement (after-review if present, else before)
   const e = REVIEW.requirements[id] || {};
@@ -178,12 +259,40 @@ async function boot() {
   $('ptitle').textContent = (proj.name || 'Review');
   $('rsub').textContent = 'reviewing ' + ORDER.length + ' requirements';
   document.title = (proj.name || 'Review') + ' · reqoach';
+  $('thInput').value = thVal();
   renderNav(); updateProg();
   const first = ORDER.find(id => (REVIEW.requirements[id] || {}).status === 'unreviewed') || ORDER[0];
   if (first) select(first);
 }
 
 function belowThreshold(id) { const s = scoreOf(id); return s != null && s < thVal(); }
+
+// ---- project threshold control ----
+// Persists to the PROJECT (PUT /projects/{pid}/threshold), which propagates to
+// this run's review server-side; we mirror it into REVIEW so the "below" filter
+// and the header update without a reload.
+async function saveThreshold() {
+  const v = parseFloat($('thInput').value);
+  if (isNaN(v) || v < 1 || v > 5) { $('thInput').value = thVal(); return; }
+  if (v === thVal()) return;
+  try {
+    const t = await fetch(`projects/${pid}/threshold`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ mode: 'avg_ge', value: v }),
+    }).then(r => r.ok ? r.json() : Promise.reject(r.status));
+    if (REVIEW) REVIEW.threshold = t;               // reflect immediately
+    $('thInput').value = t.value;
+    const s = $('thSaved'); s.textContent = 'saved ✓'; s.classList.add('show');
+    setTimeout(() => s.classList.remove('show'), 1400);
+    renderNav(); updateProg();                      // re-filter against the new floor
+  } catch (err) {
+    $('thInput').value = thVal();
+    $('thSaved').textContent = 'failed';
+    $('thSaved').classList.add('show');
+  }
+}
+$('thInput').addEventListener('change', saveThreshold);
+$('thInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('thInput').blur(); });
 
 function passesFilter(id) {
   const st = (REVIEW.requirements[id] || {}).status;
@@ -264,16 +373,28 @@ $('suggest').addEventListener('click', e => {
 const _base = location.pathname.replace(/[^/]*$/, '');
 const socket = io({ path: _base + 'socket.io' });
 let curGen = 0;
+let pendingAssessText = null;   // text sent to the current assess (confirmed on 'done')
 function assessNow() {
   const text = $('reqtext').value;
-  liveChars = {}; renderChips('assessing…'); setScore(null);
+  liveChars = {}; liveScoredText = null; pendingAssessText = text;
+  renderChips('assessing…'); setScore(null);
   socket.emit('assess', { text });
+}
+
+// The full breakdown for the CURRENT text, iff a complete live assessment matches it.
+// Persisting this on Accept makes the dashboard show reviewed scores WITH a consistent
+// C1–C9 radar — and, being a real assessment, costs no extra server call.
+function liveBreakdown(text) {
+  if (liveOverall == null || liveScoredText == null || liveScoredText !== text) return {};
+  const chars = {};
+  for (const [c] of CHARS) { if (liveChars[c] == null) return {}; chars[c] = { id: c, score: liveChars[c] }; }
+  return { characteristics: chars, judges_ok: CHARS.length, judges_total: CHARS.length, scored_text: text };
 }
 socket.on('start', e => { curGen = e.gen; });
 socket.on('idle', () => { renderChips(''); setScore((REVIEW.requirements[curId] || {}).overall_before); });
 socket.on('characteristic', e => { if (e.gen !== curGen) return; if (e.data && e.data.id && e.data.score) liveChars[e.data.id] = e.data.score; renderChips(`judged ${e.i}/${e.n}`); });
 socket.on('review', e => { if (e.gen !== curGen) return; renderSuggest(e.data); });
-socket.on('done', e => { if (e.gen !== curGen) return; liveOverall = e.overall; setScore(e.overall); renderChips(''); });
+socket.on('done', e => { if (e.gen !== curGen) return; liveOverall = e.overall; liveScoredText = pendingAssessText; setScore(e.overall); renderChips(''); });
 
 let typeTimer = null;
 $('reqtext').addEventListener('input', () => { clearTimeout(typeTimer); typeTimer = setTimeout(assessNow, 700); });
@@ -295,7 +416,7 @@ function autosaveDraft() {
   const text = $('reqtext') ? $('reqtext').value : null;
   if (text == null) return;
   if (text !== (e.final_text != null ? e.final_text : (SC[curId] || {}).text)) {
-    putReview(curId, { status: 'edited', final_text: text, overall_after: curOverall() });
+    putReview(curId, { status: 'edited', final_text: text, overall_after: curOverall(), ...liveBreakdown(text) });
   }
 }
 
@@ -306,7 +427,8 @@ $('btnOrig').addEventListener('click', async () => {
   gotoNext();
 });
 $('btnSave').addEventListener('click', async () => {
-  await putReview(curId, { status: 'edited', final_text: $('reqtext').value, overall_after: curOverall() });
+  const text = $('reqtext').value;
+  await putReview(curId, { status: 'edited', final_text: text, overall_after: curOverall(), ...liveBreakdown(text) });
   gotoNext();
 });
 $('btnSkip').addEventListener('click', async () => { await putReview(curId, { status: 'skipped' }); gotoNext(); });

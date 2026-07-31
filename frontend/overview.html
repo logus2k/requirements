@@ -31,7 +31,7 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--border)}
   header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
   header .sub{color:var(--muted);font-size:12.5px;margin-left:2px}
-  main{padding:26px 22px;max-width:1180px;margin:0 auto}
+  main{padding:26px 22px}
 
   .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;
     padding:10px 17px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
@@ -57,6 +57,7 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   .node .run:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}
   .node .link{color:var(--accent);font-size:12px;text-decoration:none;font-weight:600}
   .node .link:hover{text-decoration:underline}
+  .node .link.danger{color:var(--bad,#c0392b);font-weight:500}
   .node .abort{border:1px solid var(--s1);background:transparent;color:var(--s1);
     border-radius:8px;padding:5px 11px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
   .node .abort:hover{background:color-mix(in srgb,var(--s1) 12%,transparent)}
@@ -93,6 +94,11 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   /* run-all rail */
   .rail{display:flex;align-items:center;gap:14px;margin:2px 0 22px}
   .rail .hint{color:var(--muted);font-size:12.5px}
+  .manage-hint{margin:0 0 14px;padding:10px 14px;border-radius:10px;font-size:13px;
+    background:color-mix(in srgb,var(--accent) 8%,transparent);
+    border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);color:var(--ink)}
+  .manage-hint a{color:var(--accent);font-weight:600}
+  .node button.disabled,.runall:disabled,.delbtn:disabled{opacity:.45;cursor:not-allowed}
   .runall{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:10px;
     padding:11px 20px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px}
   .runall:hover{filter:brightness(1.06)} .runall:disabled{opacity:.5;cursor:not-allowed;filter:none}
@@ -124,6 +130,8 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
     </div>
   </div>
 
+  <div class="manage-hint" id="manageHint" style="display:none"></div>
+
   <div class="pipe" id="pipe"></div>
 
   <div id="log"></div>
@@ -143,12 +151,16 @@ const STAGES = [
   { key: 'documents', name: 'Documents',       desc: 'Upload the source material to analyse.' },
   { key: 'framing',   name: 'Problem Framing',  desc: 'Distil a structured problem statement from the documents.' },
   { key: 'quality',   name: 'Quality',          desc: 'INCOSE per-requirement scoring (C1–C9) + set-level checks.' },
+  { key: 'classify',  name: 'Classification',   desc: 'Label each requirement — routing classes, type, constraints (the Architect contract).' },
   { key: 'coverage',  name: 'Coverage',         desc: '16-domain judge panel — are the requirements enough?' },
+  { key: 'release',   name: 'Release',          desc: 'Human sign-off — approve the set for the Architect, then download the package.' },
 ];
 
 let STATE = {};   // per-stage {done,…} + transient _running/_prog/_stage/_jobId/_runStartMs/_stageStartMs
 let busy = false;
 let ticker = null;
+let PROJECT = null;   // current project meta (carries owner)
+let MANAGE = true;    // may the signed-in user manage this project? (owner or admin)
 
 function log(msg) { $('log').textContent = msg || ''; }
 
@@ -158,6 +170,8 @@ const STAGE_LABEL = {
   ingest: 'Reading documents', segment: 'Segmenting requirements',
   gate: 'Filtering non-requirements', score: 'Assessing requirements',
   review: 'Reviewing flagged requirements', set_level: 'Set-level analysis',
+  rescore: 'Re-assessing revised requirements', setlevel: 'Set-level analysis (duplicates / consistency)',
+  classify: 'Classifying requirements',
   requirements: 'Gathering requirements', judges: 'Domain-expert judges', synthesis: 'Synthesising findings',
 };
 function fmtDur(s) {
@@ -174,14 +188,39 @@ async function loadState() {
   document.title = (proj.name || 'Project') + ' · reqoach';
   try { localStorage.setItem('reqoach-project', proj.id); localStorage.setItem('reqoach-project-name', proj.name || 'project'); } catch (e) {}
 
+  // Managing (running stages, editing, sign-off) is owner-or-admin only. Browsing is public.
+  PROJECT = proj;
+  MANAGE = window.ReqoachAuth ? (await window.ReqoachAuth.me(), window.ReqoachAuth.canManage(proj)) : true;
+
   const docs = proj.documents || [], qr = proj.quality_runs || [], cr = proj.coverage_runs || [];
   const lastWhen = arr => arr.length ? (arr.map(r => r.finished_at || '').sort().slice(-1)[0]) : '';
+  // Classification status lives in the review session, not project meta — fetch it (cheap)
+  // only when there is a quality run to classify.
+  const cls = qr.length
+    ? await fetch('projects/' + encodeURIComponent(pid) + '/classification').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+    : {};
   STATE = {
     documents: { done: docs.length > 0, info: docs.length ? docs.length + ' document' + (docs.length !== 1 ? 's' : '') : '' },
     framing:   { done: !!(ps && ps.version >= 1 && ps.statement), ratified: !!(ps && ps.ratified), when: ps && ps.updated_at },
-    quality:   { done: qr.length > 0, when: lastWhen(qr), count: qr.length },
+    quality:   { done: qr.length > 0, when: lastWhen(qr), count: qr.length,
+                 runId: qr.length ? qr.slice().sort((a, b) => (a.finished_at || '').localeCompare(b.finished_at || '')).slice(-1)[0].run_id : null },
+    classify:  { done: !!cls.done, info: cls.total ? cls.classified + '/' + cls.total + ' classified' : '' },
     coverage:  { done: cr.length > 0, when: lastWhen(cr), count: cr.length },
+    release:   { done: false },   // filled from /release below (needs a quality run)
   };
+  // Release readiness — the gate verdict. Fetch when there is a run to release.
+  if (qr.length) {
+    const rel = await fetch('projects/' + encodeURIComponent(pid) + '/release').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+    STATE.release = {
+      done: rel.release_status === 'validated',
+      status: rel.release_status || 'draft',
+      canRelease: !!rel.can_release,
+      architectReady: !!rel.architect_ready,
+      hardBlockers: rel.hard_blockers || [],
+      releasedBy: rel.released_by, releasedAt: rel.released_at,
+      runId: rel.run_id,
+    };
+  }
   $('psub').textContent = pipelineSummary();
   render();
 
@@ -216,21 +255,46 @@ function render() {
   // wire per-node run + abort buttons
   STAGES.forEach(s => {
     const rb = document.getElementById('run-' + s.key);
-    if (rb) rb.addEventListener('click', () => runStage(s.key));
+    // Quality's "Re-run" reassesses the REVISED requirements (review-preserving); the
+    // first run and every other stage keep the normal extraction path.
+    if (rb) rb.addEventListener('click',
+      () => (s.key === 'quality' && STATE.quality.done) ? runRescore() : runStage(s.key));
     const ab = document.getElementById('abort-' + s.key);
     if (ab) ab.addEventListener('click', () => abortStage(s.key));
   });
+  const ri = document.getElementById('reimport-quality');
+  if (ri) ri.addEventListener('click', e => { e.preventDefault(); runReimport(); });
+  const ap = document.getElementById('approve-release');
+  if (ap) ap.addEventListener('click', approveRelease);
+  const rv = document.getElementById('revoke-release');
+  if (rv) rv.addEventListener('click', revokeRelease);
   // fill progress for any running node (persisted across the full re-render)
   STAGES.forEach(s => { if (STATE[s.key] && STATE[s.key]._running) renderProg(s.key); });
   const allDone = STAGES.every(s => STATE[s.key].done);
-  $('runAll').disabled = busy || !STATE.documents.done;
+  $('runAll').disabled = busy || !STATE.documents.done || !MANAGE;
   $('runAll').innerHTML = allDone ? '<span>↻</span> Re-run All' : '<span>▶</span> Run All';
   $('abortAll').style.display = busy ? '' : 'none';
+
+  // Public browse, gated manage: if the viewer isn't the owner/admin, disable every action
+  // (they can still read everything) and explain why. The server enforces this regardless.
+  if (!MANAGE) {
+    document.querySelectorAll('#pipe button, #runAll, #delProject, #reimport-quality, #approve-release, #revoke-release')
+      .forEach(b => { b.disabled = true; b.classList.add('disabled'); });
+    const who = window.ReqoachAuth && window.ReqoachAuth.email();
+    const owner = PROJECT && PROJECT.owner;
+    $('manageHint').innerHTML = who
+      ? `You are viewing <b>${esc(owner || 'this project')}</b>'s project as <b>${esc(who)}</b> — only the owner or the administrator can run or change it.`
+      : `<a href="${window.ReqoachAuth ? window.ReqoachAuth.signInUrl() : '#'}">Sign in with Google</a> to create and manage projects. Browsing is open to everyone.`;
+    $('manageHint').style.display = '';
+  } else {
+    const h = $('manageHint'); if (h) h.style.display = 'none';
+  }
 }
 
 function nodeHTML(s, i) {
   const st = STATE[s.key] || {};
   const enabled = enabledIndex(i);
+  if (s.key === 'release') return releaseNodeHTML(s, i, st, enabled);
   const cls = st._running ? 'running' : (st.done ? 'done' : (enabled ? 'ready' : 'locked'));
   let stateLine, action = '', prog = '';
   if (st._running) {
@@ -260,6 +324,72 @@ function nodeHTML(s, i) {
   </div>`;
 }
 
+// The Release node is a human GATE, not a run: it shows the sign-off verdict and hosts the
+// approve/revoke action plus the package/reissue downloads.
+function releaseNodeHTML(s, i, st, enabled) {
+  const pkg = 'projects/' + encodeURIComponent(pid) + '/package';
+  const reissue = 'projects/' + encodeURIComponent(pid) + '/reissue';
+  let cls, stateLine, action = '';
+  if (!enabled) {
+    cls = 'locked';
+    const need = STAGES[[...Array(i).keys()].reverse().find(k => !STATE[STAGES[k].key].done)].name;
+    stateLine = `<span class="dot"></span><span class="when">Locked · run ${esc(need)} first</span>`;
+  } else if (st.status === 'validated') {
+    cls = 'done';
+    stateLine = `<span class="dot"></span>Validated${st.releasedBy ? ` <span class="when">· by ${esc(st.releasedBy)}</span>` : ''}`;
+    action = `<button class="run" id="revoke-release">Revoke sign-off</button>`
+           + `<a class="link" href="${pkg}" download="requirements_package.json">Download package (JSON)</a>`
+           + `<a class="link" href="${reissue}?format=pdf" target="_blank">Corrected spec (PDF)</a>`
+           + `<a class="link" href="${reissue}?format=md" target="_blank">Corrected spec (MD)</a>`;
+  } else if (st.canRelease) {
+    cls = 'ready';
+    stateLine = `<span class="dot"></span>Ready to sign off`;
+    action = `<button class="run" id="approve-release" title="Approve this requirement set for the Architect">Approve for Architect</button>`
+           + `<a class="link" href="${pkg}" download="requirements_package.json">Download package (draft)</a>`
+           + `<a class="link" href="${reissue}?format=pdf" target="_blank">Corrected spec (PDF)</a>`;
+  } else {
+    cls = 'ready';
+    const n = (st.hardBlockers || []).length;
+    stateLine = `<span class="dot"></span><span class="when">Blocked · ${n} to fix</span>`;
+    action = `<button class="run" disabled title="${esc((st.hardBlockers || []).join('; '))}">Approve for Architect</button>`
+           + `<a class="link" href="${pkg}" download="requirements_package.json">Download package (draft)</a>`;
+  }
+  return `<div class="node ${cls}" id="node-release">
+    <div class="top"><span class="idx">${i + 1}</span><span class="name">${esc(s.name)}</span></div>
+    <div class="desc">${esc(s.desc)}</div>
+    <div class="state">${stateLine}</div>
+    <div class="act">${action}</div>
+  </div>`;
+}
+
+// Human sign-off: approve the set for the Architect (gate-checked server-side) / revoke it.
+async function approveRelease() {
+  if (busy) return;
+  const run = STATE.release && STATE.release.runId; if (!run) return;
+  const approver = (prompt('Approve this requirement set for the Architect.\nYour name (for the audit trail):', '') || '').trim();
+  if (approver === null) return;
+  try {
+    const r = await fetch('projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/release',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve', approver: approver || 'human' }) });
+    if (r.status === 409) { const b = await r.json(); alert('Cannot release — fix these first:\n\n• ' + ((b.detail && b.detail.hard_blockers) || b.hard_blockers || ['blockers remain']).join('\n• ')); return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    log('Signed off — the set is validated and Architect-ready.');
+  } catch (e) { alert('Sign-off failed:\n' + e.message); }
+  finally { await loadState(); }
+}
+async function revokeRelease() {
+  if (busy) return;
+  const run = STATE.release && STATE.release.runId; if (!run) return;
+  if (!confirm('Revoke the sign-off and return this set to draft?')) return;
+  try {
+    await fetch('projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/release',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'revoke' }) });
+    log('Sign-off revoked — back to draft.');
+  } catch (e) { alert('Revoke failed:\n' + e.message); }
+  finally { await loadState(); }
+}
+
 // Buttons/links inside a node: primary run/open + a view link when there is output.
 function actionLinks(s, done) {
   const view = {
@@ -269,10 +399,21 @@ function actionLinks(s, done) {
     coverage:  `<a class="link" href="coverage.html${Q}">Open coverage →</a>`,
   }[s.key];
   if (s.key === 'documents') {                 // documents = upload, not a "run"
-    return `<a class="link" href="documents.html${Q}">${done ? 'Manage documents →' : 'Upload documents →'}</a>`;
+    // Re-import (rebuild the requirement set from the current documents) belongs HERE —
+    // it is triggered by the documents changing. Shown only once a quality run exists;
+    // before that, Step 3's first "Run" is the initial extraction.
+    const reimport = STATE.quality && STATE.quality.done
+      ? `<a class="link danger" id="reimport-quality" href="#" title="Rebuild the requirement set from the current documents — supersedes the current set and its reviews">Re-import from documents ⚠</a>`
+      : '';
+    return `<a class="link" href="documents.html${Q}">${done ? 'Manage documents →' : 'Upload documents →'}</a>` + reimport;
+  }
+  // Quality, once run, offers a review-preserving reassessment as the primary Re-run.
+  if (s.key === 'quality' && done) {
+    return `<button class="run" id="run-quality" ${busy ? 'disabled' : ''} title="Re-score the revised requirements — your reviews are preserved">Re-run assessment</button>`
+         + view;
   }
   const runLabel = done ? 'Re-run' : 'Run';
-  return `<button class="run" id="run-${s.key}" ${busy ? 'disabled' : ''}>${runLabel}</button>` + (done ? view : '');
+  return `<button class="run" id="run-${s.key}" ${busy ? 'disabled' : ''}>${runLabel}</button>` + (done && view ? view : '');
 }
 
 // ---- live progress readout inside a running node ----
@@ -338,7 +479,8 @@ async function ratifyCurrent() {
 // Run one stage as a streamed job; returns the final snapshot ({cancelled:true} if aborted).
 async function runOne(key) {
   STATE[key]._runStartMs = Date.now();
-  const path = key === 'framing' ? '/framing:run' : key === 'quality' ? '/quality:run' : '/coverage:run';
+  const path = key === 'framing' ? '/framing:run' : key === 'quality' ? '/quality:run'
+             : key === 'classify' ? '/classify:run' : '/coverage:run';
   const res = await fetch('projects/' + encodeURIComponent(pid) + path, { method: 'POST' }).then(r => r.json());
   if (!res.job_id) throw new Error('could not start ' + key);
   STATE[key]._jobId = res.job_id;
@@ -356,6 +498,37 @@ async function runStage(key) {
     log(r && r.cancelled ? label + ' aborted.' : label + ' complete.');
   } catch (e) { log('✗ ' + label + ' failed: ' + e.message); alert(label + ' failed:\n' + e.message); }
   finally { busy = false; stopTicker(); if (STATE[key]) STATE[key]._running = false; await loadState(); }
+}
+
+// Re-run Quality as a REVIEW-PRESERVING reassessment: re-score the revised requirements
+// (changed-only) + recompute set-level. Reads final_text; never re-ingests the document.
+async function runRescore() {
+  if (busy) return;
+  const run = STATE.quality.runId;
+  if (!run) { alert('Run Quality first.'); return; }
+  resetAbortAll();
+  busy = true; STATE.quality._running = true; STATE.quality._runStartMs = Date.now(); startTicker(); render();
+  log('Reassessing revised requirements…');
+  try {
+    const res = await fetch('projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/rescore:run',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changed_only: true, set_level: true }) }).then(r => r.json());
+    if (!res.job_id) throw new Error('could not start reassessment');
+    STATE.quality._jobId = res.job_id;
+    const r = await pollJob(res.job_id, s => applySnapshot('quality', s));
+    log(r && r.cancelled ? 'Reassessment aborted.' : 'Reassessment complete — dashboard score updated.');
+  } catch (e) { log('✗ Reassessment failed: ' + e.message); alert('Reassessment failed:\n' + e.message); }
+  finally { busy = false; stopTicker(); if (STATE.quality) STATE.quality._running = false; await loadState(); }
+}
+
+// The destructive path: re-read the source documents from scratch. Confirmed, because it
+// produces a fresh requirement set and the current reviews stop showing on the dashboard.
+async function runReimport() {
+  if (busy) return;
+  if (!confirm('Re-import re-reads the source documents and builds a NEW requirement set.\n\n'
+    + 'It does NOT use your reviewed text, and your current reviews will no longer appear on '
+    + 'the dashboard (they are kept under the previous run, not deleted).\n\nContinue?')) return;
+  return runStage('quality');
 }
 
 async function runAll() {
@@ -378,17 +551,24 @@ async function runAll() {
     if (r && r.cancelled) { log('Pipeline aborted during Quality.'); return; }
     STATE.quality.done = true;
 
+    STATE.classify._running = true; render(); log('Classifying requirements…');
+    r = await runOne('classify');
+    STATE.classify._running = false;
+    if (r && r.cancelled) { log('Pipeline aborted during Classification.'); return; }
+    STATE.classify.done = true;
+
     STATE.coverage._running = true; render(); log('Running Coverage…');
     r = await runOne('coverage');
     STATE.coverage._running = false;
     log(r && r.cancelled ? 'Pipeline aborted during Coverage.' : 'Pipeline complete.');
   } catch (e) { log('✗ Run All stopped: ' + e.message); alert('Run All stopped:\n' + e.message); }
-  finally { busy = false; stopTicker(); ['framing', 'quality', 'coverage'].forEach(k => STATE[k] && (STATE[k]._running = false)); await loadState(); }
+  finally { busy = false; stopTicker(); ['framing', 'quality', 'classify', 'coverage'].forEach(k => STATE[k] && (STATE[k]._running = false)); await loadState(); }
 }
 
 // Reattach to a job already running server-side (page reloaded mid-run).
 function reattach(aj) {
-  const key = aj.kind === 'coverage' ? 'coverage' : aj.kind === 'framing' ? 'framing' : 'quality';
+  const key = aj.kind === 'coverage' ? 'coverage' : aj.kind === 'framing' ? 'framing'
+            : aj.kind === 'classify' ? 'classify' : 'quality';
   busy = true; STATE[key]._running = true; STATE[key]._jobId = aj.job_id; startTicker(); render();
   log('Reattached to a running ' + STAGES.find(s => s.key === key).name + ' job…');
   const finish = async () => { busy = false; stopTicker(); if (STATE[key]) STATE[key]._running = false; await loadState(); };
