@@ -366,13 +366,14 @@ function releaseNodeHTML(s, i, st, enabled) {
 async function approveRelease() {
   if (busy) return;
   const run = STATE.release && STATE.release.runId; if (!run) return;
-  const approver = (prompt('Approve this requirement set for the Architect.\nYour name (for the audit trail):', '') || '').trim();
-  if (approver === null) return;
+  // The signer's identity IS the authenticated account — no name to type. Cancel aborts.
+  const who = (window.ReqoachAuth && window.ReqoachAuth.email()) || 'you';
+  if (!confirm(`Approve this requirement set for the Architect?\n\nIt will be signed off as ${who} and marked validated (Architect-ready).`)) return;
   try {
     const r = await fetch('projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/release',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approve', approver: approver || 'human' }) });
-    if (r.status === 409) { const b = await r.json(); alert('Cannot release — fix these first:\n\n• ' + ((b.detail && b.detail.hard_blockers) || b.hard_blockers || ['blockers remain']).join('\n• ')); return; }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'approve' }) });
+    if (r.status === 401 || r.status === 403) { if (window.ReqoachAuth) window.ReqoachAuth.needAuth(r); return; }
+    if (r.status === 409) { const b = await r.json().catch(() => ({})); alert('Cannot release — fix these first:\n\n• ' + ((b.detail && b.detail.hard_blockers) || b.hard_blockers || ['blockers remain']).join('\n• ')); return; }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     log('Signed off — the set is validated and Architect-ready.');
   } catch (e) { alert('Sign-off failed:\n' + e.message); }
