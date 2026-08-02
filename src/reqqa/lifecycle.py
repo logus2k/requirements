@@ -85,11 +85,14 @@ def architecture_view(pid: str) -> dict:
             aspects.append({
                 "name": name,
                 "scope": a.get("scope", ""),
-                "components": [{"name": c.get("name"), "responsibility": c.get("responsibility", "")}
+                "components": [{"name": c.get("name"), "responsibility": c.get("responsibility", ""),
+                                "attributes": c.get("attributes", [])}
                                for c in a.get("components", [])],
-                "interfaces": [{"name": i.get("name"), "purpose": i.get("purpose", "")}
+                "interfaces": [{"name": i.get("name"), "purpose": i.get("purpose", ""),
+                                "operations": i.get("operations", [])}
                                for i in a.get("interfaces", [])],
-                "functions": [{"name": f.get("name"), "description": f.get("description", "")}
+                "functions": [{"name": f.get("name"), "description": f.get("description", ""),
+                               "inputs": f.get("inputs", []), "returns": f.get("returns")}
                               for f in a.get("functions", [])],
                 "consumes": [{"concern": c.get("concern"), "why": c.get("why", "")}
                              for c in a.get("consumes", [])],

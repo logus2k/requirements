@@ -88,6 +88,8 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
 
   /* connector arrow between nodes */
   .conn{flex:0 0 34px;display:grid;place-items:center;color:var(--axis)}
+  .pipe-label{margin:4px 2px 0;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  #pipe-architect .node{max-width:340px}
   .conn svg{width:22px;height:22px}
   .conn.flow{color:var(--ok)}
 
@@ -132,7 +134,11 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
 
   <div class="manage-hint" id="manageHint" style="display:none"></div>
 
+  <div class="pipe-label" id="analyst-label">Analyst · turns documents into a validated requirement set</div>
   <div class="pipe" id="pipe"></div>
+
+  <div class="pipe-label" id="arch-label">Architect · turns the released requirements into an architecture</div>
+  <div class="pipe" id="pipe-architect"></div>
 
   <div id="log"></div>
 </main>
@@ -161,6 +167,7 @@ let busy = false;
 let ticker = null;
 let PROJECT = null;   // current project meta (carries owner)
 let MANAGE = true;    // may the signed-in user manage this project? (owner or admin)
+let ARCH = { running: false, stage: null, jobId: null };   // Architect row (separate service)
 
 function log(msg) { $('log').textContent = msg || ''; }
 
@@ -221,8 +228,16 @@ async function loadState() {
       runId: rel.run_id,
     };
   }
+  // Architect row: ready once the set is Architect-ready; done once an architecture is committed.
+  const arch = await fetch('repos/' + encodeURIComponent(pid) + '/architecture').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+  STATE.architect = {
+    done: !!(arch && arch.exists),
+    ready: !!(STATE.release && (STATE.release.architectReady || STATE.release.done)),
+    aspects: (arch && arch.aspects) ? arch.aspects.length : 0,
+  };
   $('psub').textContent = pipelineSummary();
   render();
+  renderArchitect();
 
   // If a run is already in flight (e.g. the page was reloaded mid-run), reattach to it
   // so the live progress + Abort come back instead of the run looking idle.
@@ -289,6 +304,64 @@ function render() {
   } else {
     const h = $('manageHint'); if (h) h.style.display = 'none';
   }
+}
+
+// ---- Architect row (its own service at /architect/, polled separately) ----
+function archNodeHTML() {
+  const st = STATE.architect || {};
+  let cls, stateLine, action = '';
+  if (ARCH.running) {
+    cls = 'running';
+    stateLine = `<span class="dot"></span>Running…${ARCH.stage ? ' · ' + esc(ARCH.stage) : ''}`;
+  } else if (!st.ready) {
+    cls = 'locked';
+    stateLine = `<span class="dot"></span><span class="when">Locked · approve the set for the Architect first</span>`;
+  } else if (st.done) {
+    cls = 'done';
+    stateLine = `<span class="dot"></span>Done <span class="when">· ${st.aspects} aspect${st.aspects === 1 ? '' : 's'}</span>`;
+    action = `<button class="run" id="run-architect" ${busy || !MANAGE ? 'disabled' : ''}>Re-run</button>`
+           + `<a class="link" href="architecture.html${Q}">Open architecture →</a>`;
+  } else {
+    cls = 'ready';
+    stateLine = `<span class="dot"></span>Ready`;
+    action = `<button class="run" id="run-architect" ${busy || !MANAGE ? 'disabled' : ''}>Run Architect</button>`;
+  }
+  return `<div class="node ${cls}" id="node-architect">
+    <div class="top"><span class="idx">A</span><span class="name">Architecture</span></div>
+    <div class="desc">Per-aspect design — components, interfaces (with operation signatures), functions, dependencies, and diagrams.</div>
+    <div class="state">${stateLine}</div>
+    <div class="act">${action}</div>
+  </div>`;
+}
+function renderArchitect() {
+  const box = $('pipe-architect'); if (!box) return;
+  box.innerHTML = archNodeHTML();
+  const rb = document.getElementById('run-architect');
+  if (rb) rb.addEventListener('click', runArchitect);
+}
+async function runArchitect() {
+  if (ARCH.running) return;
+  try {
+    const res = await fetch('/architect/projects/' + encodeURIComponent(pid) + '/architect:run', { method: 'POST' });
+    if (res.status === 401 || res.status === 403) { if (window.ReqoachAuth) window.ReqoachAuth.needAuth(res); return; }
+    const j = await res.json();
+    if (!j.job_id) throw new Error('could not start');
+    ARCH.running = true; ARCH.jobId = j.job_id; ARCH.stage = 'design'; renderArchitect();
+    log('Running Architect…');
+    await pollArchitect(j.job_id);
+  } catch (e) { alert('Architect run failed:\n' + e.message); }
+  finally { ARCH.running = false; await loadState(); }
+}
+function pollArchitect(jobId) {
+  return new Promise(resolve => {
+    const t = setInterval(async () => {
+      let s; try { s = await fetch('/architect/jobs/' + jobId).then(r => r.ok ? r.json() : null); } catch (e) { s = null; }
+      if (!s) return;
+      if (s.status === 'running') { ARCH.stage = s.stage || 'design'; renderArchitect(); }
+      else if (s.status === 'done') { clearInterval(t); log('Architect complete — ' + ((s.result && s.result.aspects) || 0) + ' aspects.'); resolve(s); }
+      else if (s.status === 'error') { clearInterval(t); log('✗ Architect failed: ' + (s.error || '')); alert('Architect failed:\n' + (s.error || '')); resolve(s); }
+    }, 2500);
+  });
 }
 
 function nodeHTML(s, i) {

@@ -47,6 +47,20 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   .dgm-box{font-family:Roboto,sans-serif;background-color:#ffffff;padding:20px;
     overflow:auto;border-radius:8px;margin:4px 0 14px;border:1px solid var(--border)}
   .dgm-box svg{max-width:100%;height:auto}
+  .aspect{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .aspect h2{font-size:15px;margin:0 0 2px}
+  .scope{color:var(--ink2);font-size:13px;font-style:italic;margin-bottom:6px}
+  .block{margin-top:10px}
+  .blabel{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px}
+  .item{font-size:13px;padding:2px 0}
+  .iname{font-weight:600}
+  .idesc{color:var(--ink2)}
+  .op{font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);margin:1px 0 1px 16px}
+  .op .ret{color:var(--accent)}
+  .op.none-op{color:var(--muted);font-style:italic;font-family:inherit}
+  .attr{font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);margin:1px 0 1px 16px}
+  .attr .atype{color:var(--accent)}
+  .fdesc{color:var(--ink2);font-size:12px;margin:0 0 5px 16px}
   .hint{color:var(--muted);font-size:12px;margin-top:8px}
 </style>
 
@@ -61,8 +75,10 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
   <div class="card"><div class="status" id="status">—</div></div>
   <h3 class="sec">Open issues (<span id="issueCount">0</span>)</h3>
   <div id="issues"><div class="none">—</div></div>
-  <h3 class="sec">Aspects &amp; diagrams</h3>
-  <div id="diagrams"><div class="none">No architecture yet. Click <b>Run Architect</b>.</div></div>
+  <h3 class="sec">System overview</h3>
+  <div id="overview"><div class="none">No architecture yet. Click <b>Run Architect</b>.</div></div>
+  <h3 class="sec">Aspects (<span id="aspectCount">0</span>)</h3>
+  <div id="aspects"></div>
   <div class="hint" id="mmdHint"></div>
 </main>
 
@@ -90,38 +106,115 @@ function renderIssues(list) {
     box.appendChild(d);
   }
 }
-async function renderDiagrams(diagrams, handover) {
-  const box = $('diagrams'); box.textContent = '';
-  if (handover && Array.isArray(handover.aspects) && handover.aspects.length) {
-    const row = document.createElement('div');
-    for (const a of handover.aspects) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = a; row.appendChild(c); }
-    box.appendChild(row);
+// Render one Mermaid source into its own white, padded, Roboto box (or source on failure).
+let _mid = 0;
+async function renderMmd(mmd) {
+  const box = document.createElement('div'); box.className = 'dgm-box';
+  if (!mmd) { box.className = 'none'; box.textContent = 'No diagram.'; return box; }
+  if (window.mermaid && !window.__noMermaid) {
+    try { const { svg } = await window.mermaid.render('m' + (_mid++), mmd); box.innerHTML = svg; return box; }
+    catch (e) { /* fall through to source */ }
+  } else if (!window.__hinted) {
+    window.__hinted = 1; $('mmdHint').textContent = 'Add vendor/mermaid.min.js to render diagrams in-browser.';
   }
-  if (!diagrams.length) { const d = document.createElement('div'); d.className = 'none'; d.textContent = 'No diagrams committed yet.'; box.appendChild(d); return; }
-  const canRender = window.mermaid && !window.__noMermaid;
-  if (canRender) { try { window.mermaid.initialize({ startOnLoad: false, theme: 'neutral', fontFamily: 'Roboto, sans-serif' }); } catch (e) {} }
-  else { $('mmdHint').textContent = 'Diagram source shown — add vendor/mermaid.min.js to render them in-browser.'; }
-  let i = 0;
-  for (const dg of diagrams) {
-    const wrap = document.createElement('div'); wrap.className = 'dgm';
-    const h = document.createElement('h4'); h.textContent = dg.name.endsWith('.mmd') ? dg.name.slice(0, -4) : dg.name; wrap.appendChild(h);
-    if (canRender) {
-      const holder = document.createElement('div'); holder.className = 'dgm-box';
-      try { const { svg } = await window.mermaid.render('m' + (i++), dg.mmd); holder.innerHTML = svg; }
-      catch (e) { const pre = document.createElement('pre'); pre.className = 'mmd'; pre.textContent = dg.mmd; holder.appendChild(pre); }
-      wrap.appendChild(holder);
-    } else {
-      const pre = document.createElement('pre'); pre.className = 'mmd'; pre.textContent = dg.mmd; wrap.appendChild(pre);
+  const pre = document.createElement('pre'); pre.className = 'mmd'; pre.textContent = mmd; box.appendChild(pre); return box;
+}
+// A titled list of {name — description} rows (components / interfaces / functions / consumes).
+function listBlock(title, items, nameKey, descKey) {
+  const b = document.createElement('div'); b.className = 'block';
+  const t = document.createElement('div'); t.className = 'blabel'; t.textContent = title + ' (' + items.length + ')'; b.appendChild(t);
+  if (!items.length) { const n = document.createElement('div'); n.className = 'none'; n.textContent = '—'; b.appendChild(n); return b; }
+  for (const it of items) {
+    const row = document.createElement('div'); row.className = 'item';
+    const nm = document.createElement('span'); nm.className = 'iname'; nm.textContent = it[nameKey] || ''; row.appendChild(nm);
+    const d = it[descKey]; if (d) { const dd = document.createElement('span'); dd.className = 'idesc'; dd.textContent = ' — ' + d; row.appendChild(dd); }
+    b.appendChild(row);
+  }
+  return b;
+}
+// A component (data entity) with its typed attributes shown as field: Type.
+function componentBlock(components) {
+  const b = document.createElement('div'); b.className = 'block';
+  const t = document.createElement('div'); t.className = 'blabel'; t.textContent = 'Components (' + components.length + ')'; b.appendChild(t);
+  if (!components.length) { const n = document.createElement('div'); n.className = 'none'; n.textContent = '—'; b.appendChild(n); return b; }
+  for (const c of components) {
+    const row = document.createElement('div'); row.className = 'item';
+    const nm = document.createElement('span'); nm.className = 'iname'; nm.textContent = c.name || ''; row.appendChild(nm);
+    if (c.responsibility) { const d = document.createElement('span'); d.className = 'idesc'; d.textContent = ' — ' + c.responsibility; row.appendChild(d); }
+    b.appendChild(row);
+    const attrs = c.attributes || [];
+    for (const at of attrs) {
+      const a = document.createElement('div'); a.className = 'attr';
+      a.appendChild(document.createTextNode(at.name || ''));
+      const ty = document.createElement('span'); ty.className = 'atype'; ty.textContent = ': ' + (at.type || ''); a.appendChild(ty);
+      b.appendChild(a);
     }
-    box.appendChild(wrap);
+    if (!attrs.length) { const a = document.createElement('div'); a.className = 'attr none-op'; a.textContent = '(no attributes)'; b.appendChild(a); }
+  }
+  return b;
+}
+// One interface with its concrete operation signatures: name(p: T, …) → Return.
+function interfaceBlock(interfaces) {
+  const b = document.createElement('div'); b.className = 'block';
+  const t = document.createElement('div'); t.className = 'blabel'; t.textContent = 'Interfaces (' + interfaces.length + ')'; b.appendChild(t);
+  if (!interfaces.length) { const n = document.createElement('div'); n.className = 'none'; n.textContent = '—'; b.appendChild(n); return b; }
+  for (const it of interfaces) {
+    const row = document.createElement('div'); row.className = 'item';
+    const nm = document.createElement('span'); nm.className = 'iname'; nm.textContent = it.name || ''; row.appendChild(nm);
+    if (it.purpose) { const d = document.createElement('span'); d.className = 'idesc'; d.textContent = ' — ' + it.purpose; row.appendChild(d); }
+    b.appendChild(row);
+    const ops = it.operations || [];
+    for (const op of ops) {
+      const ins = (op.inputs || []).map(p => (p.name || '') + ': ' + (p.type || '')).join(', ');
+      const o = document.createElement('div'); o.className = 'op';
+      o.appendChild(document.createTextNode((op.name || '') + '(' + ins + ')'));
+      if (op.returns) { const r = document.createElement('span'); r.className = 'ret'; r.textContent = ' → ' + op.returns; o.appendChild(r); }
+      b.appendChild(o);
+    }
+    if (!ops.length) { const o = document.createElement('div'); o.className = 'op none-op'; o.textContent = '(no operations)'; b.appendChild(o); }
+  }
+  return b;
+}
+// Functions as concrete signatures: name(p: T, …) → Return, with a short description under each.
+function functionBlock(functions) {
+  const b = document.createElement('div'); b.className = 'block';
+  const t = document.createElement('div'); t.className = 'blabel'; t.textContent = 'Functions (' + functions.length + ')'; b.appendChild(t);
+  if (!functions.length) { const n = document.createElement('div'); n.className = 'none'; n.textContent = '—'; b.appendChild(n); return b; }
+  for (const f of functions) {
+    const ins = (f.inputs || []).map(p => (p.name || '') + ': ' + (p.type || '')).join(', ');
+    const o = document.createElement('div'); o.className = 'op';
+    o.appendChild(document.createTextNode((f.name || '') + '(' + ins + ')'));
+    if (f.returns) { const r = document.createElement('span'); r.className = 'ret'; r.textContent = ' → ' + f.returns; o.appendChild(r); }
+    b.appendChild(o);
+    if (f.description) { const d = document.createElement('div'); d.className = 'fdesc'; d.textContent = f.description; b.appendChild(d); }
+  }
+  return b;
+}
+async function renderArchitecture(view) {
+  renderIssues(view.open_issues || []);
+  if (window.mermaid && !window.__noMermaid) { try { window.mermaid.initialize({ startOnLoad: false, theme: 'neutral', fontFamily: 'Roboto, sans-serif' }); } catch (e) {} }
+  const ov = $('overview'); ov.textContent = '';
+  if (view.system_overview) ov.appendChild(await renderMmd(view.system_overview));
+  else { const n = document.createElement('div'); n.className = 'none'; n.textContent = view.exists ? 'No overview diagram.' : 'No architecture yet. Click Run Architect.'; ov.appendChild(n); }
+  const aspects = view.aspects || [];
+  $('aspectCount').textContent = aspects.length;
+  const box = $('aspects'); box.textContent = '';
+  for (const a of aspects) {
+    const card = document.createElement('section'); card.className = 'aspect';
+    const h = document.createElement('h2'); h.textContent = a.name; card.appendChild(h);
+    if (a.scope) { const s = document.createElement('div'); s.className = 'scope'; s.textContent = a.scope; card.appendChild(s); }
+    card.appendChild(await renderMmd(a.diagram));
+    card.appendChild(componentBlock(a.components || []));
+    card.appendChild(interfaceBlock(a.interfaces || []));
+    card.appendChild(functionBlock(a.functions || []));
+    card.appendChild(listBlock('Consumes', a.consumes || [], 'concern', 'why'));
+    box.appendChild(card);
   }
 }
 async function loadView() {
   try {
     const v = await fetch('repos/' + encodeURIComponent(pid) + '/architecture').then(r => r.ok ? r.json() : null);
-    if (!v) return;
-    renderIssues((v.handover && v.handover.open_issues) || []);
-    await renderDiagrams(v.diagrams || [], v.handover || {});
+    if (v) await renderArchitecture(v);
   } catch (e) {}
 }
 
