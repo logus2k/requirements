@@ -89,6 +89,10 @@ async function create() {
   try {
     const p = await fetch('/analyst/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }) }).then(r => r.json());
+    // Create the project's git repo (reqoach lifecycle backend). Fire-and-forget: repo
+    // creation must never block opening the project, and it is idempotent (reconcile catches
+    // any miss). Relative path stays under /reqoach/ so nginx gates the write.
+    fetch('repos/' + encodeURIComponent(p.id) + '/ensure', { method: 'POST' }).catch(() => {});
     openProject(p);
   } catch (e) { $('create').disabled = false; alert('Could not create project.'); }
 }

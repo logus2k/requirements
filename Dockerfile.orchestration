@@ -1,13 +1,17 @@
-# reqoach: the UI and nothing else.
+# reqoach: static frontend + a thin lifecycle backend.
 #
-# The analysis engine lives in the Analyst Agent (:7803) — this image serves the
-# static frontend and proxies every analysis call to it. It carries no engine
-# code, no INCOSE catalog and no store; those belong to the Analyst.
+# The analysis engine lives in the Analyst Agent (:7803). This image serves the
+# static frontend, proxies local-dev /analyst/* calls, and owns the cross-cutting
+# project lifecycle that no single agent owns — the per-project git repository
+# (see documents/project_git_repo_requirement.md). git is needed for that.
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# A static file server plus a proxy needs nothing more.
+# git: reqoach creates and commits the per-project repositories.
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir \
         fastapi \
         "uvicorn[standard]" \
@@ -16,7 +20,17 @@ RUN pip install --no-cache-dir \
 COPY src/ /app/src/
 COPY frontend/ /app/frontend/
 
-ENV PYTHONPATH=/app/src
+ENV PYTHONPATH=/app/src PROJECT_REPOS_ROOT=/app/project-repos
+
+# Run as a non-root user whose UID matches the host owner of ~/env/project-repos,
+# so repos created on the bind mount are not root-owned. Override at build:
+#   docker compose build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g)
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN groupadd -g "$APP_GID" app 2>/dev/null || true \
+ && useradd -u "$APP_UID" -g "$APP_GID" -m -s /usr/sbin/nologin app 2>/dev/null || true \
+ && mkdir -p /app/project-repos && chown -R "$APP_UID:$APP_GID" /app
+USER $APP_UID:$APP_GID
 
 EXPOSE 7802
 

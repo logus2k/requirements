@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import threading
 from dataclasses import dataclass, field
 
 #: Where project repos live. A shared volume in deployment; env-overridable.
@@ -118,6 +120,23 @@ def create_local_repo(project_id: str, name: str,
     return repo
 
 
+def delete_repo(project_id: str) -> bool:
+    """Remove a project's local repo (called when the project itself is deleted). Returns True
+    if a repo was removed, False if none existed. Guarded against path traversal: the id must be
+    alphanumeric (project ids are hex) and the resolved path must sit directly under the root."""
+    if not project_id.isalnum():
+        raise RepoError(f"invalid project id {project_id!r}")
+    root = os.path.realpath(REPOS_ROOT)
+    path = os.path.join(REPOS_ROOT, project_id)
+    if os.path.realpath(path) != os.path.join(root, project_id):
+        raise RepoError("refusing to delete outside the repos root")
+    if not os.path.isdir(path):
+        return False
+    with _repo_lock(project_id):
+        shutil.rmtree(path)
+    return True
+
+
 def _has_remote(path: str) -> bool:
     try:
         return bool(_git(path, "remote"))
@@ -157,3 +176,49 @@ def pending_actions(project_id: str) -> list[dict]:
     """What the UI shows the user for this project (unfinished steps)."""
     repo = get_repo(project_id)
     return [a.__dict__ for a in (repo.pending if repo else []) if not a.done]
+
+
+# --- Committing agent outputs -------------------------------------------------------------
+# Each pipeline agent writes text/artifacts into its OWN area of the repo (single-owner, so
+# no two agents touch the same path). reqoach commits — the agents need no git. Commits are
+# authored per agent so history shows who produced what, and serialised per-repo so two
+# agents finishing together cannot corrupt the index.
+
+AGENT_AUTHORS: dict[str, tuple[str, str]] = {
+    "analyst":   ("Analyst Agent",   "analyst@logus2k.com"),
+    "architect": ("Architect Agent", "architect@logus2k.com"),
+    "planner":   ("Planner Agent",   "planner@logus2k.com"),
+    "builder":   ("Builder Agent",   "builder@logus2k.com"),
+    "reqoach":   ("reqoach",         "reqoach@logus2k.com"),
+}
+
+#: One lock per project id — serialise commits to a repo (its index is not concurrency-safe).
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _repo_lock(project_id: str) -> threading.Lock:
+    with _locks_guard:
+        return _locks.setdefault(project_id, threading.Lock())
+
+
+def commit_area(project_id: str, area: str, agent: str = "reqoach",
+                message: str | None = None) -> str | None:
+    """Stage and commit whatever an agent wrote into `area`, authored as that agent.
+
+    Returns the new commit SHA, or None if the area had no changes (a no-op is not an error).
+    Only the named area is staged, so a commit never sweeps in another agent's in-flight work.
+    """
+    if area not in _LAYOUT:
+        raise RepoError(f"unknown area {area!r} (one of {_LAYOUT})")
+    path = repo_path(project_id)
+    if not os.path.isdir(os.path.join(path, ".git")):
+        raise RepoError(f"no repo for project {project_id}")
+    name, email = AGENT_AUTHORS.get(agent, AGENT_AUTHORS["reqoach"])
+    with _repo_lock(project_id):
+        _git(path, "add", "--", area)
+        if not _git(path, "diff", "--cached", "--name-only"):
+            return None                      # nothing changed in this area
+        _git(path, "-c", f"user.name={name}", "-c", f"user.email={email}",
+             "commit", "-q", "-m", message or f"{name}: update {area}")
+        return _git(path, "rev-parse", "HEAD")

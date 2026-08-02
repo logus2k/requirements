@@ -602,6 +602,9 @@ $('delProject').addEventListener('click', async () => {
   try {
     const r = await fetch('/analyst/projects/' + encodeURIComponent(pid), { method: 'DELETE' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
+    // Remove the project's git repo too (reqoach lifecycle). Best-effort: the project is
+    // already gone; a failed repo delete is a stray dir, not a user-facing error.
+    try { await fetch('repos/' + encodeURIComponent(pid), { method: 'DELETE' }); } catch (e) {}
     try { localStorage.removeItem('reqoach-project'); localStorage.removeItem('reqoach-project-name'); } catch (e) {}
     location.replace('projects.html');
   } catch (e) { b.disabled = false; b.textContent = '🗑 Delete'; alert('Could not delete project:\n' + e.message); }

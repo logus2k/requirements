@@ -154,3 +154,47 @@ in isolation, and merges. Out of scope for this first implementation; the layout
 
 ## 7. Status (living)
 - **2026-08 — Requirement written.** Implementation starting at Phase 1.
+- **2026-08-02 — Phase 1 DONE + VERIFIED LIVE.** reqoach gained a thin lifecycle backend
+  (`src/reqqa/lifecycle.py`, an APIRouter mounted in `bff.py`): `POST /repos/{pid}/ensure`,
+  `POST /repos:reconcile`, `GET /repos/{pid}`, `POST /repos/{pid}/commit`. The reqoach image
+  now installs `git` and runs as the host UID (repos on the bind mount are host-owned, not
+  root); `~/env/project-repos` is mounted at `/app/project-repos` (`PROJECT_REPOS_ROOT`).
+  `projects.html` fires `ensure` on project create (fire-and-forget; reconcile is the catch-up).
+  Verified: reconcile created 5 repos with the §4.1 layout + initial commit, host-owned,
+  idempotent; status returns the GitHub-remote pending action; edge `GET /reqoach/repos/{pid}`
+  200, unauth `POST …/ensure` 401 (nginx-gated). **Commit mechanism (the "reqoach commits"
+  seam) VERIFIED:** a file written into `requirements/` committed via `POST /repos/{pid}/commit`
+  as `Analyst Agent <analyst@logus2k.com>`; no-op on unchanged area → `committed:false`; bad
+  area → 400; per-project lock serialises commits.
+- **2026-08-02 — Phase 2 (Analyst → `requirements/`) DONE + VERIFIED LIVE.** Implemented as
+  **reqoach-pull** (not Analyst-push), which needs ZERO change to the live Analyst container:
+  reqoach fetches the Analyst package over HTTP and commits it into `requirements/` as the
+  Analyst. `POST /repos/{pid}/publish:requirements` (explicit, for a UI button) + `reconcile`
+  now full-syncs (create repo **and** snapshot requirements when there is content). Writes
+  `package.json` (the Architect's input contract) + split `glossary/tags/tree.json` for clean
+  diffs. Verified across 4 projects (111-req and 386-req scales): committed as
+  `Analyst Agent <analyst@logus2k.com>`, content matches the live package, idempotent
+  (unchanged → `committed:false`). NOTE this is a **snapshot/publish** model (versioned
+  provenance), not the "repo as shared data root" ideal — the Analyst still writes its own
+  store; reqoach snapshots the published package. That satisfies §2's provenance goal.
+- **2026-08-02 — Phase 3 (Architect → `architecture/`) DONE + VERIFIED (plumbing; full run
+  GPU-gated).** The Architect writes files, reqoach commits. `architect_agent/src/architect_agent/
+  aspect_pipeline.py` gained `publish_to_repo(pid, out_dir)` (copies the emitted architecture
+  output into `<repos_root>/<pid>/architecture/` and POSTs reqoach `/repos/{pid}/commit`,
+  agent=architect) + a `--repo` CLI flag + `run(to_repo=True)`. The architect compose mounts
+  `${HOME}/env/project-repos:/app/project-repos` (`PROJECT_REPOS_ROOT`), sets
+  `REQOACH_URL=http://host.docker.internal:7802` + `extra_hosts host-gateway`. Verified: real
+  emit (handover 2.0 + Mermaid diagrams + artifact) published + committed as
+  `Architect Agent <architect@logus2k.com>` (5 files); 65 tests pass; image rebuilt with `--repo`;
+  architect CONTAINER → reqoach reachability HTTP 200. **Only UNVERIFIED bit (GPU-gated):** a full
+  containerized run (fetch package → LLM design → `--repo` publish); the design pipeline itself
+  was verified earlier (Restaurant/Jobs), and the publish+commit path is verified here.
+- **Delete gap RESOLVED + VERIFIED:** `repo.delete_repo` (path-guarded, alnum id only) +
+  `DELETE /repos/{pid}` (idempotent) + `overview.html` calls it after a project delete. Verified:
+  delete→removed:true→gone, re-delete→false, bad id→400, reconcile does NOT resurrect a deleted
+  project's repo. (reconcile deliberately does NOT auto-prune — a transient empty Analyst list
+  would otherwise nuke every repo; explicit delete is the safe path.)
+- **Net state:** each project repo now versions `requirements/` (Analyst-authored) and
+  `architecture/` (Architect-authored) with distinct git provenance. Remaining: Planner →
+  `plans/` (Phase 3-style), GitHub push (Phase 4, use-once token), Builder worktrees (Phase 5).
+- **NOT done — Phase 4 GitHub push** (use-once UI token paste) and **Phase 5 Builder worktrees.**

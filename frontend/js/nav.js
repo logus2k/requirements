@@ -23,6 +23,7 @@
     { href: "index.html" + q,     label: "Requirements Quality",  match: "index.html" },
     { href: "review.html" + q,    label: "Review & Reissue",      match: "review.html" },
     { href: "coverage.html" + q,  label: "Requirements Coverage", match: "coverage.html" },
+    { href: "architecture.html" + q, label: "Architecture",       match: "architecture.html" },
     { href: "editor.html",        label: "Live editor",           match: "editor.html" },
   ];
   const cur = location.pathname.split("/").pop() || "index.html";

@@ -119,5 +119,10 @@ for _p in PROXIED:
     app.add_api_route(f"/{_p}", _forward, methods=_METHODS, include_in_schema=False)
     app.add_api_route(f"/{_p}/{{rest:path}}", _forward, methods=_METHODS, include_in_schema=False)
 
+# Thin lifecycle backend (per-project git repo) — registered before the static mount so its
+# routes win over the "/" catch-all.
+from . import lifecycle  # noqa: E402  (after _forward routes, before the static mount)
+app.include_router(lifecycle.router)
+
 # Static frontend LAST — it is the catch-all.
 app.mount("/", StaticFiles(directory=_FRONTEND, html=True), name="frontend")

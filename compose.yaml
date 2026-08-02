@@ -10,6 +10,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.orchestration
+      args:
+        # Match the host user so repos created on the bind mount are not root-owned.
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
     image: reqqa-orchestration:latest
     restart: unless-stopped
     # Host networking: binds host :7802 (the nginx upstream) and reaches the
@@ -17,6 +21,10 @@ services:
     network_mode: host
     environment:
       ANALYST_URL: http://localhost:7803
+      # Per-project git repos live here (see documents/project_git_repo_requirement.md).
+      PROJECT_REPOS_ROOT: /app/project-repos
     volumes:
       # Legacy static scorecards still offered in the frontend's file picker.
       - ./frontend/data:/app/frontend/data:ro
+      # Per-project git repositories (reqoach owns creation + commits).
+      - ${HOME}/env/project-repos:/app/project-repos

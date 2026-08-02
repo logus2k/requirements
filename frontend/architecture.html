@@ -1,0 +1,159 @@
+<!-- Architecture — project-scoped. Triggers the Architect Agent (a per-aspect design run,
+     like the Analyst's stages) and shows its committed output: handover summary, open issues,
+     and per-aspect diagrams. The Architect runs as an HTTP service at the /architect/ edge
+     route (POST architect:run + GET jobs/{id}); its output is read from the project repo via
+     reqoach (GET /reqoach/repos/{pid}/architecture). Mermaid diagrams render if vendor/mermaid
+     is present; otherwise the diagram source is shown. -->
+<meta charset="utf-8">
+<title>Architecture · reqoach</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
+if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('reqoach-project'))location.replace('projects.html');</script>
+<link rel="stylesheet" href="css/nav.css">
+<style>
+  :root{
+    --surface:#fcfcfb; --plane:#e9e9e9; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --border:rgba(11,11,11,.10); --accent:#2a78d6; --s1:#d03b3b; --s4:#6bbf59;
+    --panel2:rgba(11,11,11,.05);
+  }
+  html[data-theme="dark"]{
+    --surface:#1a1a19; --plane:#0d0d0d; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+    --border:rgba(255,255,255,.10); --accent:#3987e5; --panel2:rgba(255,255,255,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
+  header .runs{margin-left:auto;display:flex;gap:10px}
+  main{padding:22px;max-width:1000px;margin:0 auto}
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;
+    padding:9px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .btn:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--border)}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+  h3.sec{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:22px 0 8px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:8px 0}
+  .status{font-size:13px;color:var(--ink2)}
+  .status.err{color:var(--s1)}
+  .status.ok{color:var(--s4)}
+  .none{color:var(--muted);padding:14px 2px;font-size:13.5px}
+  .issue{border-left:3px solid var(--s1);padding:6px 12px;margin:6px 0;background:var(--panel2);border-radius:0 6px 6px 0;font-size:13px}
+  .chip{display:inline-block;background:var(--panel2);border-radius:6px;padding:2px 9px;margin:2px 4px 2px 0;font-size:12.5px}
+  pre.mmd{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px;
+    overflow:auto;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .dgm h4{margin:14px 0 4px;font-size:13.5px}
+  /* Each diagram sits in its own white, padded, Roboto box. */
+  .dgm-box{font-family:Roboto,sans-serif;background-color:#ffffff;padding:20px;
+    overflow:auto;border-radius:8px;margin:4px 0 14px;border:1px solid var(--border)}
+  .dgm-box svg{max-width:100%;height:auto}
+  .hint{color:var(--muted);font-size:12px;margin-top:8px}
+</style>
+
+<header>
+  <div><h1 id="ptitle">Architecture</h1></div>
+  <div class="runs">
+    <button class="btn" id="run">▶ Run Architect</button>
+    <a class="btn ghost" href="overview.html" id="toPipeline" title="Project pipeline">← Pipeline</a>
+  </div>
+</header>
+<main>
+  <div class="card"><div class="status" id="status">—</div></div>
+  <h3 class="sec">Open issues (<span id="issueCount">0</span>)</h3>
+  <div id="issues"><div class="none">—</div></div>
+  <h3 class="sec">Aspects &amp; diagrams</h3>
+  <div id="diagrams"><div class="none">No architecture yet. Click <b>Run Architect</b>.</div></div>
+  <div class="hint" id="mmdHint"></div>
+</main>
+
+<!-- Progressive: if vendor/mermaid.min.js is present, diagrams render; else source is shown. -->
+<script src="vendor/mermaid.min.js" onerror="window.__noMermaid=1"></script>
+<script src="js/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const pid = new URLSearchParams(location.search).get('project')
+  || (() => { try { return localStorage.getItem('reqoach-project'); } catch (e) { return null; } })();
+if (!pid) location.href = 'projects.html';
+
+const ARCHITECT = '/architect';   // edge route to the Architect service
+
+function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); }
+
+// --- render the committed architecture output ---
+function renderIssues(list) {
+  $('issueCount').textContent = list.length;
+  const box = $('issues'); box.textContent = '';
+  if (!list.length) { const d = document.createElement('div'); d.className = 'none'; d.textContent = 'None.'; box.appendChild(d); return; }
+  for (const it of list) {
+    const d = document.createElement('div'); d.className = 'issue';
+    d.textContent = typeof it === 'string' ? it : (it.detail || it.kind || JSON.stringify(it));
+    box.appendChild(d);
+  }
+}
+async function renderDiagrams(diagrams, handover) {
+  const box = $('diagrams'); box.textContent = '';
+  if (handover && Array.isArray(handover.aspects) && handover.aspects.length) {
+    const row = document.createElement('div');
+    for (const a of handover.aspects) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = a; row.appendChild(c); }
+    box.appendChild(row);
+  }
+  if (!diagrams.length) { const d = document.createElement('div'); d.className = 'none'; d.textContent = 'No diagrams committed yet.'; box.appendChild(d); return; }
+  const canRender = window.mermaid && !window.__noMermaid;
+  if (canRender) { try { window.mermaid.initialize({ startOnLoad: false, theme: 'neutral', fontFamily: 'Roboto, sans-serif' }); } catch (e) {} }
+  else { $('mmdHint').textContent = 'Diagram source shown — add vendor/mermaid.min.js to render them in-browser.'; }
+  let i = 0;
+  for (const dg of diagrams) {
+    const wrap = document.createElement('div'); wrap.className = 'dgm';
+    const h = document.createElement('h4'); h.textContent = dg.name.endsWith('.mmd') ? dg.name.slice(0, -4) : dg.name; wrap.appendChild(h);
+    if (canRender) {
+      const holder = document.createElement('div'); holder.className = 'dgm-box';
+      try { const { svg } = await window.mermaid.render('m' + (i++), dg.mmd); holder.innerHTML = svg; }
+      catch (e) { const pre = document.createElement('pre'); pre.className = 'mmd'; pre.textContent = dg.mmd; holder.appendChild(pre); }
+      wrap.appendChild(holder);
+    } else {
+      const pre = document.createElement('pre'); pre.className = 'mmd'; pre.textContent = dg.mmd; wrap.appendChild(pre);
+    }
+    box.appendChild(wrap);
+  }
+}
+async function loadView() {
+  try {
+    const v = await fetch('repos/' + encodeURIComponent(pid) + '/architecture').then(r => r.ok ? r.json() : null);
+    if (!v) return;
+    renderIssues((v.handover && v.handover.open_issues) || []);
+    await renderDiagrams(v.diagrams || [], v.handover || {});
+  } catch (e) {}
+}
+
+// --- trigger + poll the Architect job ---
+async function pollArchitect(jobId) {
+  for (;;) {
+    await new Promise(r => setTimeout(r, 2000));
+    let s; try { s = await fetch(ARCHITECT + '/jobs/' + jobId).then(r => r.ok ? r.json() : null); } catch (e) { s = null; }
+    if (!s) continue;
+    if (s.status === 'running') setStatus('Running — ' + (s.stage || 'design') + '…');
+    else if (s.status === 'done') { setStatus('Done — ' + (s.result ? (s.result.aspects + ' aspects, ' + s.result.open_issues + ' open issues') : 'ok'), 'ok'); return s; }
+    else if (s.status === 'error') { setStatus('Failed: ' + (s.error || 'unknown'), 'err'); return s; }
+  }
+}
+$('run').addEventListener('click', async () => {
+  const b = $('run'); b.disabled = true;
+  setStatus('Starting…');
+  try {
+    const res = await fetch(ARCHITECT + '/projects/' + encodeURIComponent(pid) + '/architect:run', { method: 'POST' });
+    if (res.status === 401) { setStatus('Sign in required to run the Architect.', 'err'); b.disabled = false; return; }
+    const j = await res.json();
+    if (!j.job_id) throw new Error('could not start');
+    await pollArchitect(j.job_id);
+    await loadView();
+  } catch (e) { setStatus('Failed: ' + e.message, 'err'); }
+  finally { b.disabled = false; }
+});
+
+// title + initial view
+fetch('/analyst/projects/' + encodeURIComponent(pid)).then(r => r.ok ? r.json() : null).then(p => {
+  if (p && p.name) { $('ptitle').textContent = p.name + ' · Architecture'; document.title = p.name + ' · Architecture'; }
+}).catch(() => {});
+setStatus('Ready. Click Run Architect to design the architecture from the current requirements.');
+loadView();
+</script>
