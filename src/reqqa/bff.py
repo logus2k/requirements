@@ -5,8 +5,11 @@ frontend and forwards every analysis call to it, so the browser still talks to a
 single origin (no CORS, no frontend changes).
 
   /                     static frontend (dashboard, editor, coverage, review, …)
-  /projects, /jobs, /rules, /catalog, /documents   -> proxied to the Analyst
-  /socket.io                                        -> proxied to the Analyst
+  /analyst/*            -> proxied to the Analyst, prefix stripped — LOCAL-DEV PARITY only.
+                           In production nginx routes /analyst/* straight to :7803; the browser
+                           never reaches this route. The frontend calls /analyst/... in both.
+  /documents            -> proxied to the Analyst (admin upload via ingest.html)
+  /socket.io            -> proxied to the Analyst (local polling transport)
 
 socket.io: DEPLOYED, nginx routes `/reqoach/socket.io/` straight to the Analyst,
 so the browser gets a real WebSocket. LOCALLY there is no nginx, so the polling
@@ -28,8 +31,12 @@ _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _FRONTEND = os.path.join(_REPO, "frontend")
 ANALYST_URL = os.environ.get("ANALYST_URL", "http://localhost:7803").rstrip("/")
 
-# Paths the Analyst owns. Everything else is a static asset.
-PROXIED = ("projects", "jobs", "rules", "catalog", "documents", "socket.io")
+# Paths proxied to the Analyst. The frontend now calls the Analyst via the /analyst/ edge
+# route (nginx -> :7803), so the old bare prefixes (projects/jobs/rules/catalog) are dead and
+# have been removed. `analyst` is kept for LOCAL DEV (no nginx): the browser's /analyst/*
+# calls are proxied here with the prefix stripped. `documents` (admin upload via ingest.html)
+# and `socket.io` (local polling transport) are still hit directly. Else = static asset.
+PROXIED = ("analyst", "documents", "socket.io")
 _METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
 
 # Hop-by-hop headers must not be forwarded (RFC 7230 §6.1) — and content-length is
@@ -77,7 +84,12 @@ async def analyst_health() -> dict:
 
 async def _forward(request: Request) -> Response:
     """Forward a request to the Analyst verbatim (path, query, method, headers, body)."""
-    url = f"{ANALYST_URL}{request.url.path}"
+    # The /analyst/ prefix is an edge alias, not a real Analyst path — strip it before
+    # forwarding (production nginx does the same, so local dev stays identical).
+    path = request.url.path
+    if path == "/analyst" or path.startswith("/analyst/"):
+        path = path[len("/analyst"):] or "/"
+    url = f"{ANALYST_URL}{path}"
     if request.url.query:
         url += f"?{request.url.query}"
     headers = {k: v for k, v in request.headers.items() if k.lower() not in _DROP}

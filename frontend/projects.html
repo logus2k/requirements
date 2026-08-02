@@ -80,14 +80,14 @@ function render(projects) {
 }
 
 function load() {
-  fetch('projects').then(r => r.json()).then(d => render(d.projects || [])).catch(() => render([]));
+  fetch('/analyst/projects').then(r => r.json()).then(d => render(d.projects || [])).catch(() => render([]));
 }
 
 async function create() {
   const name = $('name').value.trim();
   $('create').disabled = true;
   try {
-    const p = await fetch('projects', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const p = await fetch('/analyst/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }) }).then(r => r.json());
     openProject(p);
   } catch (e) { $('create').disabled = false; alert('Could not create project.'); }

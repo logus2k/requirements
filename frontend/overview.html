@@ -181,8 +181,8 @@ function fmtDur(s) {
 
 async function loadState() {
   const [proj, ps] = await Promise.all([
-    fetch('projects/' + encodeURIComponent(pid)).then(r => r.ok ? r.json() : Promise.reject('project')),
-    fetch('projects/' + encodeURIComponent(pid) + '/problem-statement').then(r => r.ok ? r.json() : {}),
+    fetch('/analyst/projects/' + encodeURIComponent(pid)).then(r => r.ok ? r.json() : Promise.reject('project')),
+    fetch('/analyst/projects/' + encodeURIComponent(pid) + '/problem-statement').then(r => r.ok ? r.json() : {}),
   ]);
   $('ptitle').textContent = proj.name || 'Project';
   document.title = (proj.name || 'Project') + ' · reqoach';
@@ -197,7 +197,7 @@ async function loadState() {
   // Classification status lives in the review session, not project meta — fetch it (cheap)
   // only when there is a quality run to classify.
   const cls = qr.length
-    ? await fetch('projects/' + encodeURIComponent(pid) + '/classification').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+    ? await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/classification').then(r => r.ok ? r.json() : {}).catch(() => ({}))
     : {};
   STATE = {
     documents: { done: docs.length > 0, info: docs.length ? docs.length + ' document' + (docs.length !== 1 ? 's' : '') : '' },
@@ -210,7 +210,7 @@ async function loadState() {
   };
   // Release readiness — the gate verdict. Fetch when there is a run to release.
   if (qr.length) {
-    const rel = await fetch('projects/' + encodeURIComponent(pid) + '/release').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+    const rel = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/release').then(r => r.ok ? r.json() : {}).catch(() => ({}));
     STATE.release = {
       done: rel.release_status === 'validated',
       status: rel.release_status || 'draft',
@@ -227,7 +227,7 @@ async function loadState() {
   // If a run is already in flight (e.g. the page was reloaded mid-run), reattach to it
   // so the live progress + Abort come back instead of the run looking idle.
   if (!busy) {
-    const aj = await fetch('projects/' + encodeURIComponent(pid) + '/active-job')
+    const aj = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/active-job')
       .then(r => r.ok ? r.json() : {}).catch(() => ({}));
     if (aj && aj.job_id) reattach(aj);
   }
@@ -370,7 +370,7 @@ async function approveRelease() {
   const who = (window.ReqoachAuth && window.ReqoachAuth.email()) || 'you';
   if (!confirm(`Approve this requirement set for the Architect?\n\nIt will be signed off as ${who} and marked validated (Architect-ready).`)) return;
   try {
-    const r = await fetch('projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/release',
+    const r = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/release',
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'approve' }) });
     if (r.status === 401 || r.status === 403) { if (window.ReqoachAuth) window.ReqoachAuth.needAuth(r); return; }
     if (r.status === 409) { const b = await r.json().catch(() => ({})); alert('Cannot release — fix these first:\n\n• ' + ((b.detail && b.detail.hard_blockers) || b.hard_blockers || ['blockers remain']).join('\n• ')); return; }
@@ -384,7 +384,7 @@ async function revokeRelease() {
   const run = STATE.release && STATE.release.runId; if (!run) return;
   if (!confirm('Revoke the sign-off and return this set to draft?')) return;
   try {
-    await fetch('projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/release',
+    await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/release',
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'revoke' }) });
     log('Sign-off revoked — back to draft.');
   } catch (e) { alert('Revoke failed:\n' + e.message); }
@@ -456,7 +456,7 @@ function stopTicker() { if (ticker) { clearInterval(ticker); ticker = null; } }
 function pollJob(jobId, onStage) {
   return new Promise((resolve, reject) => {
     const t = setInterval(async () => {
-      const s = await fetch('jobs/' + jobId).then(r => r.ok ? r.json() : null).catch(() => null);
+      const s = await fetch('/analyst/jobs/' + jobId).then(r => r.ok ? r.json() : null).catch(() => null);
       if (!s) return;
       if (onStage) onStage(s);
       if (s.status === 'done') { clearInterval(t); resolve(s); }
@@ -468,10 +468,10 @@ function pollJob(jobId, onStage) {
 
 // Auto-accept (ratify) the current problem statement — used by Run All after framing.
 async function ratifyCurrent() {
-  const ps = await fetch('projects/' + encodeURIComponent(pid) + '/problem-statement')
+  const ps = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/problem-statement')
     .then(r => r.ok ? r.json() : null).catch(() => null);
   if (ps && ps.statement) {
-    await fetch('projects/' + encodeURIComponent(pid) + '/problem-statement',
+    await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/problem-statement',
       { method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ statement: ps.statement, ratified: true }) });
   }
@@ -482,7 +482,7 @@ async function runOne(key) {
   STATE[key]._runStartMs = Date.now();
   const path = key === 'framing' ? '/framing:run' : key === 'quality' ? '/quality:run'
              : key === 'classify' ? '/classify:run' : '/coverage:run';
-  const res = await fetch('projects/' + encodeURIComponent(pid) + path, { method: 'POST' }).then(r => r.json());
+  const res = await fetch('/analyst/projects/' + encodeURIComponent(pid) + path, { method: 'POST' }).then(r => r.json());
   if (!res.job_id) throw new Error('could not start ' + key);
   STATE[key]._jobId = res.job_id;
   return await pollJob(res.job_id, s => applySnapshot(key, s));
@@ -511,7 +511,7 @@ async function runRescore() {
   busy = true; STATE.quality._running = true; STATE.quality._runStartMs = Date.now(); startTicker(); render();
   log('Reassessing revised requirements…');
   try {
-    const res = await fetch('projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/rescore:run',
+    const res = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/reviews/' + encodeURIComponent(run) + '/rescore:run',
       { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ changed_only: true, set_level: true }) }).then(r => r.json());
     if (!res.job_id) throw new Error('could not start reassessment');
@@ -581,13 +581,13 @@ function reattach(aj) {
 async function abortStage(key) {
   const st = STATE[key]; if (!st || !st._jobId) return;
   const b = document.getElementById('abort-' + key); if (b) { b.disabled = true; b.textContent = 'Aborting…'; }
-  try { await fetch('jobs/' + st._jobId + '/cancel', { method: 'POST' }); log('Aborting… (finishing in-flight work)'); } catch (e) {}
+  try { await fetch('/analyst/jobs/' + st._jobId + '/cancel', { method: 'POST' }); log('Aborting… (finishing in-flight work)'); } catch (e) {}
 }
 
 async function abortAll() {
   const b = $('abortAll'); if (b) { b.disabled = true; b.textContent = '■ Aborting…'; }
   const running = STAGES.find(s => STATE[s.key] && STATE[s.key]._running && STATE[s.key]._jobId);
-  if (running) { try { await fetch('jobs/' + STATE[running.key]._jobId + '/cancel', { method: 'POST' }); } catch (e) {} }
+  if (running) { try { await fetch('/analyst/jobs/' + STATE[running.key]._jobId + '/cancel', { method: 'POST' }); } catch (e) {} }
   log('Aborting… (finishing in-flight work)');
 }
 function resetAbortAll() { const b = $('abortAll'); if (b) { b.disabled = false; b.textContent = '■ Abort'; } }
@@ -600,7 +600,7 @@ $('delProject').addEventListener('click', async () => {
   if (!confirm(`Delete "${name}" and all its documents and analysis runs?\n\nThis cannot be undone.`)) return;
   const b = $('delProject'); b.disabled = true; b.textContent = 'Deleting…';
   try {
-    const r = await fetch('projects/' + encodeURIComponent(pid), { method: 'DELETE' });
+    const r = await fetch('/analyst/projects/' + encodeURIComponent(pid), { method: 'DELETE' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     try { localStorage.removeItem('reqoach-project'); localStorage.removeItem('reqoach-project-name'); } catch (e) {}
     location.replace('projects.html');

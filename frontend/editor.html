@@ -156,7 +156,7 @@ const rCat =id=>(RULES[id]&&RULES[id].category)||'Other';
 const rText=id=>(RULES[id]&&RULES[id].text)||'';
 const CAT_PALETTE=['#2a78d6','#8a63d2','#0f9d8c','#d98324','#c0507a','#5a7a8c','#b0902a'];
 const _cc={}; const catColor=c=>(_cc[c]||(_cc[c]=CAT_PALETTE[Object.keys(_cc).length%CAT_PALETTE.length]));
-fetch('rules').then(r=>r.ok?r.json():{}).then(m=>{RULES=m||{};
+fetch('/analyst/rules').then(r=>r.ok?r.json():{}).then(m=>{RULES=m||{};
   ALLCATS=[...new Set(Object.values(RULES).map(x=>x.category).filter(Boolean))]; drawRadars();}).catch(()=>{});
 
 // ---- radars (echarts): Characteristics (C1–C9 scores) + Rules (category conformance),

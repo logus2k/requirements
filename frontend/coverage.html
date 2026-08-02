@@ -108,13 +108,13 @@ const sevColor=s=>({critical:cssVar('--s1'),high:cssVar('--s2'),medium:cssVar('-
 
 // ---- boot ----
 Promise.all([
-  fetch('catalog/archetypes').then(r=>r.json()).then(d=>{(d.archetypes||[]).forEach(a=>ARCHE[a.id]=a.name)}).catch(()=>{}),
-  fetch('catalog/domains').then(r=>r.json()).then(d=>{(d.domains||[]).forEach(x=>DOMS[x.id]=x.name)}).catch(()=>{}),
-  fetch('projects/'+encodeURIComponent(pid)).then(r=>r.ok?r.json():null).then(p=>{ if(p){$('ptitle').textContent='Coverage · '+p.name; document.title=p.name+' — Coverage';}}).catch(()=>{}),
+  fetch('/analyst/catalog/archetypes').then(r=>r.json()).then(d=>{(d.archetypes||[]).forEach(a=>ARCHE[a.id]=a.name)}).catch(()=>{}),
+  fetch('/analyst/catalog/domains').then(r=>r.json()).then(d=>{(d.domains||[]).forEach(x=>DOMS[x.id]=x.name)}).catch(()=>{}),
+  fetch('/analyst/projects/'+encodeURIComponent(pid)).then(r=>r.ok?r.json():null).then(p=>{ if(p){$('ptitle').textContent='Coverage · '+p.name; document.title=p.name+' — Coverage';}}).catch(()=>{}),
 ]).then(loadStatement);
 
 function loadStatement(){
-  fetch('projects/'+encodeURIComponent(pid)+'/problem-statement').then(r=>r.json()).then(d=>{
+  fetch('/analyst/projects/'+encodeURIComponent(pid)+'/problem-statement').then(r=>r.json()).then(d=>{
     ST=d && d.statement ? d.statement : null;
     $('status').textContent = ST ? `v${d.version} · ${d.ratified?'ratified':'draft'} · overall ${ST.overall_confidence||'—'}` : '';
     renderStatement(d); loadProfile();
@@ -179,7 +179,7 @@ function collectStatement(){
 }
 function put(ratified){
   const statement=collectStatement();
-  return fetch('projects/'+encodeURIComponent(pid)+'/problem-statement',{method:'PUT',headers:{'Content-Type':'application/json'},
+  return fetch('/analyst/projects/'+encodeURIComponent(pid)+'/problem-statement',{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({statement,ratified})}).then(r=>r.json());
 }
 function wireToolbar(){
@@ -189,14 +189,14 @@ function wireToolbar(){
 }
 function reframe(){
   const btn=$('frame'); btn.disabled=true; btn.textContent='Framing… (~20s)';
-  fetch('projects/'+encodeURIComponent(pid)+'/problem-statement:generate',{method:'POST',headers:{'Content-Type':'application/json'},
+  fetch('/analyst/projects/'+encodeURIComponent(pid)+'/problem-statement:generate',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({user_request:($('req')?$('req').value:'')||''})}).then(r=>r.json())
     .then(loadStatement).catch(()=>{btn.disabled=false;btn.textContent='▶ Frame problem';alert('Framing failed.');});
 }
 
 // ---- Profile tab ----
 function loadProfile(){
-  fetch('projects/'+encodeURIComponent(pid)+'/coverage-profile').then(r=>r.json()).then(d=>{PROFILE=d&&d.profile?d.profile:null; renderProfile();});
+  fetch('/analyst/projects/'+encodeURIComponent(pid)+'/coverage-profile').then(r=>r.json()).then(d=>{PROFILE=d&&d.profile?d.profile:null; renderProfile();});
 }
 function renderProfile(){
   const el=$('pane-profile');
@@ -213,18 +213,18 @@ function renderProfile(){
     if(k==='a') PROFILE.archetypes=arche.filter(a=>a.id!==id); else PROFILE.salient_domains=doms.filter(a=>a.id!==id); renderProfile();}));
   const aa=$('addArche'); if(aa) aa.addEventListener('change',()=>{if(aa.value){PROFILE.archetypes=[...arche,{id:aa.value,confidence:'medium',why:'added manually'}];renderProfile();}});
   const ad=$('addDom'); if(ad) ad.addEventListener('change',()=>{if(ad.value){PROFILE.salient_domains=[...doms,{id:ad.value,confidence:'medium',why:'added manually'}];renderProfile();}});
-  $('saveprof').addEventListener('click',()=>fetch('projects/'+encodeURIComponent(pid)+'/coverage-profile',{method:'PUT',
+  $('saveprof').addEventListener('click',()=>fetch('/analyst/projects/'+encodeURIComponent(pid)+'/coverage-profile',{method:'PUT',
     headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:PROFILE})}).then(()=>{$('saveprof').textContent='Saved ✓';setTimeout(()=>$('saveprof').textContent='Save profile',1500);}));
 }
 function chip(k,id,name,conf){return `<span class="chip"><b>${esc(name)}</b><span class="conf" style="background:${confColor(conf)};font-size:10px;padding:1px 6px">${esc(conf||'')}</span><button class="x" data-k="${k}" data-id="${esc(id)}" title="remove">×</button></span>`;}
 
 // ---- Coverage tab ----
 let COV=undefined, covFilter=null;
-function loadCoverage(){ fetch('projects/'+encodeURIComponent(pid)+'/coverage').then(r=>r.ok?r.json():null).then(c=>{COV=c;renderCoverage();}); }
+function loadCoverage(){ fetch('/analyst/projects/'+encodeURIComponent(pid)+'/coverage').then(r=>r.ok?r.json():null).then(c=>{COV=c;renderCoverage();}); }
 function runCoverage(){
   const btn=$('runcov'); if(btn){btn.disabled=true;btn.textContent='Running…';}
-  fetch('projects/'+encodeURIComponent(pid)+'/coverage:run',{method:'POST'}).then(r=>r.json()).then(res=>{
-    const job=res.job_id, t=setInterval(()=>{ fetch('jobs/'+job).then(r=>r.json()).then(s=>{
+  fetch('/analyst/projects/'+encodeURIComponent(pid)+'/coverage:run',{method:'POST'}).then(r=>r.json()).then(res=>{
+    const job=res.job_id, t=setInterval(()=>{ fetch('/analyst/jobs/'+job).then(r=>r.json()).then(s=>{
       if(s.status==='running'){ if($('runcov')) $('runcov').textContent='Running… '+((s.progress||{}).done||0)+'/16'; }
       else if(s.status==='done'){ clearInterval(t); loadCoverage(); }
       else if(s.status==='error'){ clearInterval(t); if($('runcov')){$('runcov').disabled=false;$('runcov').textContent='▶ Run Coverage';} alert('Coverage run failed:\n'+(s.error||'')); }

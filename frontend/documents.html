@@ -84,7 +84,7 @@ function renderDocs(docs) {
 }
 
 function loadProject() {
-  fetch('projects/' + encodeURIComponent(pid)).then(r => {
+  fetch('/analyst/projects/' + encodeURIComponent(pid)).then(r => {
     if (!r.ok) throw new Error('project'); return r.json();
   }).then(p => {
     $('ptitle').textContent = p.name || 'Documents';
@@ -100,7 +100,7 @@ async function upload(files) {
   for (const f of files) fd.append('files', f);
   $('drop').classList.add('over');
   try {
-    const res = await fetch('projects/' + encodeURIComponent(pid) + '/documents', { method: 'POST', body: fd }).then(r => r.json());
+    const res = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/documents', { method: 'POST', body: fd }).then(r => r.json());
     if (res.errors && res.errors.length) alert('Some files were skipped:\n' + res.errors.map(e => `${e.filename}: ${e.error}`).join('\n'));
     loadProject();
   } catch (e) { alert('Upload failed.'); }

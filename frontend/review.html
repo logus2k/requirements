@@ -243,15 +243,15 @@ const thVal = () => (REVIEW && REVIEW.threshold && REVIEW.threshold.value) || 4.
 async function boot() {
   // resolve latest run if not given
   if (!run) {
-    const runs = await fetch('projects/' + encodeURIComponent(pid) + '/quality').then(r => r.ok ? r.json() : {runs: []}).catch(() => ({runs: []}));
+    const runs = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/quality').then(r => r.ok ? r.json() : {runs: []}).catch(() => ({runs: []}));
     const rs = (runs.runs || []).slice().sort((a,b) => (b.finished_at||'').localeCompare(a.finished_at||''));
     if (!rs.length) { $('editempty').textContent = 'No quality run to review yet.'; return; }
     run = rs[0].run_id;
   }
   const [rev, sc, proj] = await Promise.all([
-    fetch(`projects/${pid}/reviews/${run}`).then(r => r.ok ? r.json() : Promise.reject('review')),
-    fetch(`projects/${pid}/quality/scorecard?run=${encodeURIComponent(run)}`).then(r => r.ok ? r.json() : {requirements: []}),
-    fetch('projects/' + encodeURIComponent(pid)).then(r => r.ok ? r.json() : {}),
+    fetch(`/analyst/projects/${pid}/reviews/${run}`).then(r => r.ok ? r.json() : Promise.reject('review')),
+    fetch(`/analyst/projects/${pid}/quality/scorecard?run=${encodeURIComponent(run)}`).then(r => r.ok ? r.json() : {requirements: []}),
+    fetch('/analyst/projects/' + encodeURIComponent(pid)).then(r => r.ok ? r.json() : {}),
   ]);
   REVIEW = rev;
   ORDER = (sc.requirements || []).map(r => r.req_id);
@@ -276,7 +276,7 @@ async function saveThreshold() {
   if (isNaN(v) || v < 1 || v > 5) { $('thInput').value = thVal(); return; }
   if (v === thVal()) return;
   try {
-    const t = await fetch(`projects/${pid}/threshold`, {
+    const t = await fetch(`/analyst/projects/${pid}/threshold`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ mode: 'avg_ge', value: v }),
     }).then(r => r.ok ? r.json() : Promise.reject(r.status));
@@ -401,7 +401,7 @@ $('reqtext').addEventListener('input', () => { clearTimeout(typeTimer); typeTime
 
 // ---- persistence ----
 async function putReview(id, patch) {
-  const entry = await fetch(`projects/${pid}/reviews/${run}/requirements/${encodeURIComponent(id)}`,
+  const entry = await fetch(`/analyst/projects/${pid}/reviews/${run}/requirements/${encodeURIComponent(id)}`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(r => r.ok ? r.json() : null);
   if (entry) REVIEW.requirements[id] = entry;
   renderNav(); updateProg();

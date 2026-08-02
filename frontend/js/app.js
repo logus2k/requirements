@@ -619,7 +619,7 @@
 
   // Rule metadata (names, categories, guidance) for the R findings + chart.
   // Best-effort: a static-only deploy without the API just falls back to bare ids.
-  const rulesP = fetch('rules').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+  const rulesP = fetch('/analyst/rules').then(r => r.ok ? r.json() : {}).catch(() => ({}));
 
   // ---- boot: pick data mode ----
   const reveal = () => { document.body.style.visibility = 'visible'; };   // undo the pre-render hide
@@ -634,7 +634,7 @@
     reveal();
     const P = encodeURIComponent(projectId);
     rulesP.then(m => { RULES = m || {};
-      return fetch('projects/' + P + '/quality').then(r => r.ok ? r.json() : { runs: [] }); })
+      return fetch('/analyst/projects/' + P + '/quality').then(r => r.ok ? r.json() : { runs: [] }); })
       .then(d => {
         const runs = (d.runs || []).slice().sort((a, b) => (b.finished_at || '').localeCompare(a.finished_at || ''));
         if (!runs.length) {                    // no quality run yet — hide the picker, show the prompt
@@ -645,7 +645,7 @@
         const opts = runs.map(r => ({ value: r.run_id, name: (r.source_file || 'run') + (r.total ? ' · ' + r.total : '') }));
         const want = new URLSearchParams(location.search).get('run');
         const startVal = (want && opts.find(o => o.value === want) || opts[0]).value;
-        const loadRun = rid => fetch('projects/' + P + '/quality/scorecard?run=' + encodeURIComponent(rid))
+        const loadRun = rid => fetch('/analyst/projects/' + P + '/quality/scorecard?run=' + encodeURIComponent(rid))
           .then(r => r.json()).then(loadScorecard).catch(() => showNoRun());
         setDocOptions(opts, startVal, loadRun);
         loadRun(startVal);
