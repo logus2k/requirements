@@ -28,7 +28,7 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
   *{box-sizing:border-box}
   body{margin:0;background:var(--plane);color:var(--ink);
     font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-  header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  header{display:flex;align-items:center;gap:14px;padding:16px 16px 16px 12px;border-bottom:1px solid var(--border)}
   header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
   header .sub{color:var(--muted);font-size:12.5px;margin-left:2px}
   main{padding:26px 22px}
@@ -101,15 +101,15 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
     border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);color:var(--ink)}
   .manage-hint a{color:var(--accent);font-weight:600}
   .node button.disabled,.runall:disabled,.delbtn:disabled{opacity:.45;cursor:not-allowed}
-  .runall{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:10px;
-    padding:11px 20px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px}
+  .runall{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:7px;
+    padding:5px 15px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px}
   .runall:hover{filter:brightness(1.06)} .runall:disabled{opacity:.5;cursor:not-allowed;filter:none}
   .abortall{border:1px solid var(--s1);background:transparent;color:var(--s1);border-radius:10px;
     padding:11px 18px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
   .abortall:hover{background:color-mix(in srgb,var(--s1) 12%,transparent)}
   .abortall:disabled{opacity:.5;cursor:default}
-  .delbtn{border:1px solid var(--s1);background:var(--s1);color:#fff;border-radius:10px;
-    padding:11px 18px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .delbtn{border:1px solid var(--s1);background:var(--s1);color:#fff;border-radius:7px;
+    padding:5px 15px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
   .delbtn:hover{filter:brightness(1.06)} .delbtn:disabled{opacity:.5;cursor:default;filter:none}
 
   .note{background:var(--surface);border:1px solid var(--border);border-radius:11px;
@@ -120,17 +120,14 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
 </style>
 
 <header>
-  <div><h1 id="ptitle">Project</h1><div class="sub" id="psub"></div></div>
+  <div><h1 id="ptitle">Project</h1></div>
+  <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+    <button class="delbtn" id="delProject" title="Delete this project and all its data">🗑 Delete</button>
+    <button class="abortall" id="abortAll" style="display:none">■ Abort</button>
+    <button class="runall" id="runAll" disabled><span>▶</span> Run All</button>
+  </div>
 </header>
 <main>
-  <div class="rail">
-    <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
-      <button class="delbtn" id="delProject" title="Delete this project and all its data">🗑 Delete</button>
-      <button class="abortall" id="abortAll" style="display:none">■ Abort</button>
-      <button class="runall" id="runAll" disabled><span>▶</span> Run All</button>
-    </div>
-  </div>
-
   <div class="manage-hint" id="manageHint" style="display:none"></div>
 
   <div class="pipe-label" id="analyst-label">Analyst · turns documents into a validated requirement set</div>
@@ -233,7 +230,6 @@ async function loadState() {
     ready: !!(STATE.release && (STATE.release.architectReady || STATE.release.done)),
     aspects: (arch && arch.aspects) ? arch.aspects.length : 0,
   };
-  $('psub').textContent = pipelineSummary();
   render();
   renderArchitect();
 

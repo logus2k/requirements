@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from . import repo
@@ -27,6 +28,43 @@ from . import repo
 ANALYST_URL = os.environ.get("ANALYST_URL", "http://localhost:7803").rstrip("/")
 
 router = APIRouter(tags=["lifecycle"])
+
+# --- identity: email is verified by nginx; name + picture come from Google's UserInfo -------
+# Google omits name/picture from the ID token; they live at the UserInfo endpoint, reachable
+# with the access token oauth2-proxy forwards as X-Access-Token. Cached briefly per token.
+_GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+_userinfo_cache: dict = {}
+
+
+def _google_userinfo(access_token: str) -> dict:
+    if not access_token:
+        return {}
+    hit = _userinfo_cache.get(access_token)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    try:
+        r = httpx.get(_GOOGLE_USERINFO_URL,
+                      headers={"Authorization": f"Bearer {access_token}"}, timeout=8)
+        info = r.json() if r.status_code == 200 else {}
+    except Exception:  # noqa: BLE001 — profile is best-effort; never break /me
+        info = {}
+    if len(_userinfo_cache) > 256:
+        _userinfo_cache.clear()
+    _userinfo_cache[access_token] = (time.time() + 600, info)
+    return info
+
+
+@router.get("/me")
+def me(request: Request) -> dict:
+    """The signed-in user for the nav: email (verified by nginx) + name/picture (Google).
+    Anonymous → {authenticated: false}. Never 401s (the edge routes anon here too)."""
+    email = (request.headers.get("x-forwarded-email")
+             or request.headers.get("x-auth-request-email") or "").strip().lower()
+    token = request.headers.get("x-access-token") or ""
+    info = _google_userinfo(token) if (email and token) else {}
+    return {"authenticated": bool(email), "email": email,
+            "name": (info.get("name") or "").strip() or None,
+            "picture": info.get("picture") or None}
 
 
 def _project(pid: str) -> dict | None:

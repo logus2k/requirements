@@ -43,17 +43,34 @@
   nav.innerHTML =
     '<a class="brand" href="projects.html">reqoach</a>' +
     '<span class="spacer"></span>' +
-    `<a class="proj${pid ? "" : " none"}" id="reqoach-proj" href="projects.html" title="Switch / manage projects">` +
-      (pid ? "…" : "Select project…") + "</a>" +
-    '<span class="authbox" id="reqoach-auth"></span>' +
-    '<button class="tbtn tbtn-icon" id="reqoach-theme" title="Toggle light / dark" aria-label="Toggle light / dark"></button>';
+    '<div class="usermenu" id="reqoach-user"></div>';
   document.body.prepend(nav);
 
-  // Fill the project chip with the project's name — fetched, not stored.
+  // The active project is chosen from the banner title (#ptitle) — see the selector below.
   if (pid) {
-    fetch("/analyst/projects/" + encodeURIComponent(pid)).then(r => r.ok ? r.json() : null)
-      .then(p => { const el = document.getElementById("reqoach-proj"); if (el && p && p.name) el.textContent = p.name; })
-      .catch(() => {});
+    const titleEl = document.getElementById("ptitle");
+    if (titleEl) {
+      titleEl.classList.add("project-select");
+      titleEl.title = "Switch project";
+      let pop = null;
+      const close = () => { if (pop) { pop.remove(); pop = null; } };
+      titleEl.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (pop) { close(); return; }
+        pop = document.createElement("div"); pop.className = "project-pop";
+        pop.innerHTML = '<div class="pp-note">Loading…</div>';
+        titleEl.appendChild(pop);
+        try {
+          const list = await fetch("/analyst/projects").then(r => r.ok ? r.json() : { projects: [] });
+          const page = location.pathname.split("/").pop() || "overview.html";
+          const rows = (list.projects || []).map(p =>
+            `<a class="pp-item${p.id === pid ? " active" : ""}" href="${page}?project=${encodeURIComponent(p.id)}">${esc(p.name || "project")}</a>`).join("");
+          pop.innerHTML = (rows || '<div class="pp-note">No projects</div>')
+            + '<a class="pp-item pp-all" href="projects.html">Manage projects…</a>';
+        } catch (err) { pop.innerHTML = '<div class="pp-note">Failed to load</div>'; }
+      });
+      document.addEventListener("click", close);
+    }
   }
 
   // Row 2: lifecycle phases (only with a project selected).
@@ -65,7 +82,10 @@
       const active = p.match.indexOf(cur) >= 0 ? " active" : "";
       return `<a class="phase${active}" href="${p.href}${q}">${p.label}</a>`;
     }).join("");
-    nav.insertAdjacentElement("afterend", phases);
+    // The phases row sits BELOW the page header (project title + actions), not directly under
+    // the top nav — so the order is: top bar → project title/actions → phases → content.
+    const header = document.querySelector("header");
+    (header || nav).insertAdjacentElement("afterend", phases);
 
     // Row 3: Requirements sub-tabs, only on a Requirements page.
     if (REQ_TABS.some(t => t.match === cur)) {
@@ -88,8 +108,8 @@
     async me() {
       if (this._me !== undefined) return this._me;
       try {
-        const r = await fetch("/oauth2/userinfo", { headers: { Accept: "application/json" } });
-        this._me = r.ok ? await r.json() : null;         // {email,user,…} or null when anonymous
+        const r = await fetch("me", { headers: { Accept: "application/json" } });   // /reqoach/me
+        this._me = r.ok ? await r.json() : null;         // {authenticated,email,name,picture} or null
       } catch (e) { this._me = null; }
       return this._me;
     },
@@ -117,30 +137,49 @@
   };
   window.ReqoachAuth = ReqoachAuth;
 
-  const authEl = document.getElementById("reqoach-auth");
-  ReqoachAuth.me().then(me => {
-    if (me && me.email) {
-      authEl.innerHTML = `<span class="who" title="${esc(me.email)}">${esc(me.email)}</span>`
-        + `<a class="authlink" href="${ReqoachAuth.signOutUrl()}">Sign out</a>`;
-    } else {
-      authEl.innerHTML = `<a class="authlink signin" href="${ReqoachAuth.signInUrl()}">Sign in</a>`;
-    }
-    window.dispatchEvent(new CustomEvent("reqoach:auth", { detail: me || null }));
-  });
-
-  const themeBtn = document.getElementById("reqoach-theme");
-  // Show the icon of the theme you'd switch TO: moon on light (go dark), sun on dark (go light).
-  const setThemeIcon = () => {
-    themeBtn.textContent = document.documentElement.dataset.theme === "dark" ? "☀︎" : "☾";
-  };
-  setThemeIcon();
-  themeBtn.addEventListener("click", () => {
-    const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  // --- Identity widget: an avatar button that opens a menu (name, theme, sign in/out) ------
+  const currentTheme = () => document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  const themeLabel = () => currentTheme() === "dark" ? "☀︎  Light theme" : "☾  Dark theme";
+  function toggleTheme() {
+    const t = currentTheme() === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t;
     document.cookie = "reqoach-theme=" + t + ";path=/;max-age=31536000;samesite=lax";
-    setThemeIcon();
+    const ti = document.getElementById("um-theme"); if (ti) ti.textContent = themeLabel();
     if (typeof window.reqoachRedraw === "function") window.reqoachRedraw();
     window.dispatchEvent(new CustomEvent("reqoach:theme", { detail: t }));
+  }
+  const rd = encodeURIComponent(location.pathname + location.search);
+  const box = document.getElementById("reqoach-user");
+
+  function renderUser(me) {
+    const authed = !!(me && me.authenticated && me.email);
+    const trigger = (authed && me.picture)
+      ? `<img class="avatar" src="${esc(me.picture)}" alt="" referrerpolicy="no-referrer">`
+      : `<span class="avatar avatar-icon">${authed ? "👤" : "👤"}</span>`;
+    const nameBlock = authed
+      ? `<div class="um-name">${esc(me.name || me.email)}</div><div class="um-email">${esc(me.email)}</div><div class="um-sep"></div>`
+      : "";
+    const authItem = authed
+      ? `<a class="um-item" href="/oauth2/sign_out?rd=${rd}">Sign out</a>`
+      : `<a class="um-item" href="/oauth2/sign_in?rd=${rd}">Sign in</a>`;
+    box.innerHTML =
+      `<button type="button" class="avatarbtn" id="reqoach-avatar" aria-haspopup="true" ` +
+        `title="${esc(authed ? me.email : "Account")}">${trigger}</button>` +
+      `<div class="um-pop hidden" id="reqoach-pop">${nameBlock}` +
+        `<button type="button" class="um-item" id="um-theme">${themeLabel()}</button>${authItem}</div>`;
+    const btn = document.getElementById("reqoach-avatar");
+    const pop = document.getElementById("reqoach-pop");
+    btn.addEventListener("click", e => { e.stopPropagation(); pop.classList.toggle("hidden"); });
+    document.getElementById("um-theme").addEventListener("click", e => { e.stopPropagation(); toggleTheme(); });
+  }
+  // Close the menu on any outside click (bound once).
+  document.addEventListener("click", () => {
+    const pop = document.getElementById("reqoach-pop"); if (pop) pop.classList.add("hidden");
+  });
+  renderUser(null);   // generic icon until identity resolves
+  ReqoachAuth.me().then(me => {
+    renderUser(me);
+    window.dispatchEvent(new CustomEvent("reqoach:auth", { detail: me || null }));
   });
 
   // If the page has a connection LED (#status), relocate it into the nav so it sits
