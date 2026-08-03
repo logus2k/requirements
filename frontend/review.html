@@ -5,8 +5,8 @@
 <meta charset="utf-8">
 <title>Review · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
-if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('reqoach-project'))location.replace('projects.html');</script>
+<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
+if(!new URLSearchParams(location.search).get('project'))location.replace('projects.html');</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -183,8 +183,6 @@ const $ = id => document.getElementById(id);
   ]) {
     const h = document.getElementById(id);
     if (!h) continue;
-    const saved = localStorage.getItem('reqoach-review' + varName);
-    if (saved) root.style.setProperty(varName, saved + 'px');
     let startX, startW;
     const onMove = e => {
       const delta = (e.clientX - startX) * sign;
@@ -195,12 +193,6 @@ const $ = id => document.getElementById(id);
       h.classList.remove('dragging');
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
-      const cur = getComputedStyle(grid).getPropertyValue(
-        varName === '--navw' ? 'grid-template-columns' : 'grid-template-columns');
-      // read back the resolved px width of the relevant column
-      const cols = getComputedStyle(grid).gridTemplateColumns.split(' ');
-      const px = varName === '--navw' ? cols[0] : cols[cols.length - 1];
-      localStorage.setItem('reqoach-review' + varName, parseInt(px, 10));
     };
     h.addEventListener('pointerdown', e => {
       startX = e.clientX;
@@ -217,7 +209,7 @@ const $ = id => document.getElementById(id);
 
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const q = new URLSearchParams(location.search);
-const pid = q.get('project') || localStorage.getItem('reqoach-project');
+const pid = q.get('project');
 let run = q.get('run') || null;
 if (!pid) location.replace('projects.html');
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();

@@ -9,9 +9,9 @@
 <meta charset="utf-8">
 <title>Overview · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
+<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
 // project-scoped: with no project, go to the switcher BEFORE render (no page flash)
-if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('reqoach-project'))location.replace('projects.html');</script>
+if(!new URLSearchParams(location.search).get('project'))location.replace('projects.html');</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -124,7 +124,6 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
 </header>
 <main>
   <div class="rail">
-    <div class="hint">Run the whole pipeline, or run one stage at a time — each stage unlocks once the ones before it have run.</div>
     <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
       <button class="delbtn" id="delProject" title="Delete this project and all its data">🗑 Delete</button>
       <button class="abortall" id="abortAll" style="display:none">■ Abort</button>
@@ -147,7 +146,7 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const pid = new URLSearchParams(location.search).get('project') || (() => { try { return localStorage.getItem('reqoach-project'); } catch (e) { return null; } })();
+const pid = new URLSearchParams(location.search).get('project');
 if (!pid) location.replace('projects.html');
 const Q = '?project=' + encodeURIComponent(pid);
 const when = iso => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
@@ -193,7 +192,6 @@ async function loadState() {
   ]);
   $('ptitle').textContent = proj.name || 'Project';
   document.title = (proj.name || 'Project') + ' · reqoach';
-  try { localStorage.setItem('reqoach-project', proj.id); localStorage.setItem('reqoach-project-name', proj.name || 'project'); } catch (e) {}
 
   // Managing (running stages, editing, sign-off) is owner-or-admin only. Browsing is public.
   PROJECT = proj;
@@ -678,7 +676,6 @@ $('delProject').addEventListener('click', async () => {
     // Remove the project's git repo too (reqoach lifecycle). Best-effort: the project is
     // already gone; a failed repo delete is a stray dir, not a user-facing error.
     try { await fetch('repos/' + encodeURIComponent(pid), { method: 'DELETE' }); } catch (e) {}
-    try { localStorage.removeItem('reqoach-project'); localStorage.removeItem('reqoach-project-name'); } catch (e) {}
     location.replace('projects.html');
   } catch (e) { b.disabled = false; b.textContent = '🗑 Delete'; alert('Could not delete project:\n' + e.message); }
 });

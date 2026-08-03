@@ -218,7 +218,7 @@
   .slcard .slname{font-weight:700;font-size:14px}
   .slcard .sljust{color:var(--ink2);font-size:13px;margin-top:7px}
 </style>
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];</script>
 <link rel="stylesheet" href="css/nav.css">
 </head>
 <body>

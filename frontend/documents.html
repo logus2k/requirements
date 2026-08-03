@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <title>Documents · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
+<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
 // project-scoped: with no project, go to the switcher BEFORE render (no page flash)
-if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('reqoach-project'))location.replace('projects.html');</script>
+if(!new URLSearchParams(location.search).get('project'))location.replace('projects.html');</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -69,7 +69,7 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const pid = new URLSearchParams(location.search).get('project') || (() => { try { return localStorage.getItem('reqoach-project'); } catch (e) { return null; } })();
+const pid = new URLSearchParams(location.search).get('project');
 const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
 
 if (!pid) { location.href = 'projects.html'; }
@@ -89,7 +89,6 @@ function loadProject() {
   }).then(p => {
     $('ptitle').textContent = p.name || 'Documents';
     document.title = (p.name || 'Documents') + ' · reqoach';
-    try { localStorage.setItem('reqoach-project', p.id); localStorage.setItem('reqoach-project-name', p.name || 'project'); } catch (e) {}
     renderDocs(p.documents || []);
   }).catch(() => { location.href = 'projects.html'; });
 }

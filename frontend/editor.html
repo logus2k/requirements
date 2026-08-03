@@ -101,7 +101,7 @@
   .rw .txt{font-weight:500}.rw .meta{color:var(--mut);font-size:12px;margin-top:4px}.adv{color:var(--s3)}
   .muted{color:var(--mut);font-size:13px}
 </style>
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';</script>
+<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];</script>
 <link rel="stylesheet" href="css/nav.css">
 </head>
 <body>

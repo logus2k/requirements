@@ -45,6 +45,39 @@
 }
 .reqoach-nav .tbtn:hover{background:var(--panel2, rgba(128,128,128,.10))}
 
+/* Row 2 — lifecycle phases (Overview / Requirements / Architecture / …). */
+.reqoach-phases{
+  display:flex; align-items:center; gap:2px;
+  padding:0 12px; height:42px; overflow-x:auto;
+  background:var(--panel, var(--surface, #fff));
+  border-bottom:1px solid var(--line, var(--border, rgba(128,128,128,.2)));
+  position:sticky; top:46px; z-index:99;
+  font:14px/1 system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+.reqoach-phases .phase{
+  color:var(--mut, var(--muted, #777)); text-decoration:none;
+  padding:8px 14px; border-radius:8px; font-size:13.5px; white-space:nowrap;
+}
+.reqoach-phases .phase:hover{ background:var(--panel2, rgba(128,128,128,.10)); color:var(--fg, var(--ink,#111)); }
+.reqoach-phases .phase.active{ color:var(--fg, var(--ink,#111)); font-weight:600; background:var(--panel2, rgba(128,128,128,.12)); }
+.reqoach-phases .phase.soon{ color:var(--mut, var(--muted,#aaa)); opacity:.45; cursor:default; }
+
+/* Row 3 — sub-tabs inside the Requirements section. */
+.reqoach-subtabs{
+  display:flex; align-items:center; gap:18px;
+  padding:0 18px; height:38px; overflow-x:auto;
+  background:var(--plane, var(--panel2, transparent));
+  border-bottom:1px solid var(--line, var(--border, rgba(128,128,128,.15)));
+  position:sticky; top:88px; z-index:98;
+  font:13px/1 system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+.reqoach-subtabs .subtab{
+  color:var(--mut, var(--muted,#888)); text-decoration:none;
+  padding:9px 2px; font-size:13px; white-space:nowrap; border-bottom:2px solid transparent;
+}
+.reqoach-subtabs .subtab:hover{ color:var(--fg, var(--ink,#111)); }
+.reqoach-subtabs .subtab.active{ color:var(--fg, var(--ink,#111)); font-weight:600; border-bottom-color:var(--accent, var(--acc,#6096e5)); }
+
 /* Google identity control (sign-in state) */
 .reqoach-nav .authbox{display:inline-flex;align-items:center;gap:8px;margin:0 4px}
 .reqoach-nav .authbox .who{

@@ -1,13 +1,13 @@
 <!-- Projects — landing / switcher (projects mode, see specs/projects_mode/). Create a
-     project or open an existing one; selecting a project stores it as the current
-     project (localStorage) and opens its Overview (pipeline) home. -->
+     project or open an existing one; opening a project navigates to its Overview
+     (pipeline) home with ?project=<id> in the URL (no client-side storage). -->
 <meta charset="utf-8">
 <title>Projects · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
+<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
 // The switcher is "choose a project" — clear any remembered selection so nothing is active
 // until the user picks one here (runs before nav.js, so the nav chip shows "Select project…").
-try{localStorage.removeItem('reqoach-project');localStorage.removeItem('reqoach-project-name');}catch(e){}</script>
+</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -61,7 +61,6 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;
 const fmtDate = iso => { const d = iso ? iso.slice(0, 10) : ''; return d; };
 
 function openProject(p) {
-  try { localStorage.setItem('reqoach-project', p.id); localStorage.setItem('reqoach-project-name', p.name || 'project'); } catch (e) {}
   location.href = 'overview.html?project=' + encodeURIComponent(p.id);
 }
 

@@ -7,8 +7,8 @@
 <meta charset="utf-8">
 <title>Architecture · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>document.documentElement.dataset.theme=localStorage.getItem('reqoach-theme')||'light';
-if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('reqoach-project'))location.replace('projects.html');</script>
+<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
+if(!new URLSearchParams(location.search).get('project'))location.replace('projects.html');</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -87,8 +87,7 @@ if(!new URLSearchParams(location.search).get('project')&&!localStorage.getItem('
 <script src="js/nav.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-const pid = new URLSearchParams(location.search).get('project')
-  || (() => { try { return localStorage.getItem('reqoach-project'); } catch (e) { return null; } })();
+const pid = new URLSearchParams(location.search).get('project');
 if (!pid) location.href = 'projects.html';
 
 const ARCHITECT = '/architect';   // edge route to the Architect service

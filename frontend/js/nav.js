@@ -1,47 +1,81 @@
 /* Shared top nav for every reqoach page. Projects mode: brand → Projects, a
  * current-project chip (switcher), then the project-scoped pages. Owns the theme
- * (flips `data-theme`, persists to localStorage, calls window.reqoachRedraw() and
+ * (flips `data-theme`, persists to a cookie, calls window.reqoachRedraw() and
  * dispatches "reqoach:theme"). Theme is initialised before this runs by a one-line
  * inline <head> script, so there's no flash.
  *
- * Current project lives in localStorage: reqoach-project (id) + reqoach-project-name.
- * Project-scoped links carry ?project=<id> so a page always knows its project. */
+ * The current project is carried in the URL (?project=<id>) — no client storage — and the
+ * project name is fetched for the chip. Theme persistence uses a cookie, not localStorage. */
 (function () {
   "use strict";
-  const ls = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-  const pid = ls("reqoach-project");
-  const pname = ls("reqoach-project-name");
+  // Stateless: the project id comes ONLY from the URL (?project=…) — no localStorage. A page
+  // opened without one sends the visitor to the project switcher. The name is fetched below.
+  const pid = new URLSearchParams(location.search).get("project");
   const q = pid ? "?project=" + encodeURIComponent(pid) : "";
 
-  // Project-scoped pages carry the current project; Live editor is project-independent.
-  const PAGES = [
-    { href: "overview.html" + q,  label: "Overview",             match: "overview.html" },
-    { href: "documents.html" + q, label: "Documents",            match: "documents.html" },
-    { href: "index.html" + q,     label: "Requirements Quality",  match: "index.html" },
-    { href: "review.html" + q,    label: "Review & Reissue",      match: "review.html" },
-    { href: "coverage.html" + q,  label: "Requirements Coverage", match: "coverage.html" },
-    { href: "architecture.html" + q, label: "Architecture",       match: "architecture.html" },
-    { href: "editor.html",        label: "Live editor",           match: "editor.html" },
-  ];
   const cur = location.pathname.split("/").pop() || "index.html";
 
+  // Lifecycle phases (second row) — shown only when a project is selected. Requirements is a
+  // section holding several pages; the future SDLC phases are shown but not yet linkable.
+  const PHASES = [
+    { label: "Overview",     href: "overview.html",     match: ["overview.html"] },
+    { label: "Requirements", href: "index.html",        match: ["index.html", "review.html", "coverage.html", "editor.html"] },
+    { label: "Architecture", href: "architecture.html", match: ["architecture.html"] },
+    { label: "Planning",     href: "planning.html",     match: ["planning.html"],    soon: true },
+    { label: "Development",  href: "development.html",   match: ["development.html"],  soon: true },
+    { label: "Deployment",   href: "deployment.html",   match: ["deployment.html"],   soon: true },
+    { label: "Operation",    href: "operation.html",    match: ["operation.html"],    soon: true },
+  ];
+  // Sub-tabs inside the Requirements section (third row).
+  const REQ_TABS = [
+    { label: "Quality",  href: "index.html",    match: "index.html" },
+    { label: "Review",   href: "review.html",   match: "review.html" },
+    { label: "Coverage", href: "coverage.html", match: "coverage.html" },
+    { label: "Editor",   href: "editor.html",   match: "editor.html" },
+  ];
+
+  // Row 1: brand (left); project selector + auth + theme (right).
   const nav = document.createElement("nav");
   nav.className = "reqoach-nav";
   nav.innerHTML =
     '<a class="brand" href="projects.html">reqoach</a>' +
-    PAGES.map(p =>
-      `<a class="item${p.match === cur ? " active" : ""}" href="${p.href}">${p.label}</a>`
-    ).join("") +
     '<span class="spacer"></span>' +
-    // Current-project chip lives on the right, just before the theme toggle.
-    `<a class="proj${pid ? "" : " none"}" href="projects.html" title="Switch / manage projects">` +
-      (pid ? esc(pname || "project") : "Select project…") + "</a>" +
+    `<a class="proj${pid ? "" : " none"}" id="reqoach-proj" href="projects.html" title="Switch / manage projects">` +
+      (pid ? "…" : "Select project…") + "</a>" +
     '<span class="authbox" id="reqoach-auth"></span>' +
     '<button class="tbtn tbtn-icon" id="reqoach-theme" title="Toggle light / dark" aria-label="Toggle light / dark"></button>';
   document.body.prepend(nav);
+
+  // Fill the project chip with the project's name — fetched, not stored.
+  if (pid) {
+    fetch("/analyst/projects/" + encodeURIComponent(pid)).then(r => r.ok ? r.json() : null)
+      .then(p => { const el = document.getElementById("reqoach-proj"); if (el && p && p.name) el.textContent = p.name; })
+      .catch(() => {});
+  }
+
+  // Row 2: lifecycle phases (only with a project selected).
+  if (pid) {
+    const phases = document.createElement("div");
+    phases.className = "reqoach-phases";
+    phases.innerHTML = PHASES.map(p => {
+      if (p.soon) return `<span class="phase soon" title="Coming soon">${p.label}</span>`;
+      const active = p.match.indexOf(cur) >= 0 ? " active" : "";
+      return `<a class="phase${active}" href="${p.href}${q}">${p.label}</a>`;
+    }).join("");
+    nav.insertAdjacentElement("afterend", phases);
+
+    // Row 3: Requirements sub-tabs, only on a Requirements page.
+    if (REQ_TABS.some(t => t.match === cur)) {
+      const subs = document.createElement("div");
+      subs.className = "reqoach-subtabs";
+      subs.innerHTML = REQ_TABS.map(t =>
+        `<a class="subtab${t.match === cur ? " active" : ""}" href="${t.href}${q}">${t.label}</a>`).join("");
+      phases.insertAdjacentElement("afterend", subs);
+    }
+  }
 
   // --- Google identity (public browse, gated manage) -------------------------------------
   // Browsing needs no login; creating/managing does. Identity comes from oauth2-proxy's
@@ -103,7 +137,7 @@
   themeBtn.addEventListener("click", () => {
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t;
-    try { localStorage.setItem("reqoach-theme", t); } catch (e) {}
+    document.cookie = "reqoach-theme=" + t + ";path=/;max-age=31536000;samesite=lax";
     setThemeIcon();
     if (typeof window.reqoachRedraw === "function") window.reqoachRedraw();
     window.dispatchEvent(new CustomEvent("reqoach:theme", { detail: t }));
