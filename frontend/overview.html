@@ -145,6 +145,12 @@
     border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:6px}
   .kb-pop label{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;font-size:12.5px;cursor:pointer}
   .kb-pop label:hover{background:var(--plane)}
+  .kb-pop-foot{display:flex;align-items:center;gap:8px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
+  .kb-hint{margin-right:auto;font-size:11px;color:var(--muted)}
+  .kb-saved{font-size:11.5px;color:var(--s4);font-weight:600}
+  .kb-done{border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:6px;
+    padding:3px 12px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+  .kb-done:hover{background:var(--plane)}
   .kb-del{border:none;background:none;color:var(--s1);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px}
   .kb-del:hover{background:color-mix(in srgb,var(--s1) 12%,transparent)}
   .kb-empty{color:var(--muted);font-size:13px;padding:14px 2px}
@@ -762,12 +768,14 @@ function renderKB() {
     if (kbCanManage(d) && KB.projects.length) {
       const opts = KB.projects.map(p =>
         `<label><input type="checkbox" data-did="${d.id}" value="${p.id}" ${(d.projects || []).indexOf(p.id) >= 0 ? 'checked' : ''}>${esc(p.name || 'project')}</label>`).join('');
-      attach = `<details class="kb-attach"><summary>Edit ▾</summary><div class="kb-pop">${opts}</div></details>`;
+      attach = `<details class="kb-attach"><summary>Edit ▾</summary><div class="kb-pop">${opts}`
+        + `<div class="kb-pop-foot"><span class="kb-hint">Saved automatically</span><span class="kb-saved"></span>`
+        + `<button type="button" class="kb-done">Done</button></div></div></details>`;
     }
     const del = kbCanManage(d) ? `<button class="kb-del" data-del="${d.id}" title="Delete from the Knowledge Base">🗑</button>` : '';
-    return `<tr>
+    return `<tr data-did="${d.id}">
       <td><a class="kb-name" href="/analyst/kb/documents/${d.id}/source" target="_blank" rel="noopener">${esc(d.filename || 'document')}</a></td>
-      <td>${chips} ${attach}</td>
+      <td><span class="kb-chips">${chips}</span> ${attach}</td>
       <td class="kb-size">${kbBytes(d.size)}</td>
       <td class="kb-when">${esc(when(d.uploaded_at))}</td>
       <td>${del}</td>
@@ -775,18 +783,34 @@ function renderKB() {
   }).join('');
   $('kbRows').querySelectorAll('.kb-pop input[type=checkbox]').forEach(cb =>
     cb.addEventListener('change', () => kbAttach(cb.dataset.did)));
+  $('kbRows').querySelectorAll('.kb-done').forEach(b =>
+    b.addEventListener('click', () => { const d = b.closest('.kb-attach'); if (d) d.open = false; }));
   $('kbRows').querySelectorAll('[data-del]').forEach(b =>
     b.addEventListener('click', () => kbDelete(b.dataset.del)));
 }
 
 async function kbAttach(did) {
+  const row = $('kbRows').querySelector(`tr[data-did="${did}"]`);
+  const status = row && row.querySelector('.kb-saved');
   const boxes = $('kbRows').querySelectorAll(`.kb-pop input[data-did="${did}"]`);
   const pids = [...boxes].filter(b => b.checked).map(b => b.value);
+  if (status) status.textContent = 'Saving…';
   const r = await fetch('/analyst/kb/documents/' + did, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projects: pids }),
   });
   if (window.ReqoachAuth && window.ReqoachAuth.needAuth(r)) return;
-  await loadKB();
+  if (!r.ok) { if (status) status.textContent = 'Save failed'; return; }
+  // Update the local model + this row's chips IN PLACE, so the open popup isn't torn down
+  // mid-edit (the user can keep ticking projects) and the change is visibly reflected.
+  const d = KB.docs.find(x => x.id === did);
+  if (d) {
+    d.projects = pids;
+    d.project_names = pids.map(p => (KB.projects.find(x => x.id === p) || {}).name || p);
+    const chipsCell = row && row.querySelector('.kb-chips');
+    if (chipsCell) chipsCell.innerHTML = d.project_names.map(n => `<span class="kb-chip">${esc(n)}</span>`).join('')
+      || '<span class="kb-when">—</span>';
+  }
+  if (status) { status.textContent = 'Saved ✓'; setTimeout(() => { if (status.textContent === 'Saved ✓') status.textContent = ''; }, 1600); }
   if (pid) loadState();   // a project's document set may have changed → refresh the framing gate
 }
 
@@ -861,5 +885,12 @@ $('kbTable').querySelectorAll('th[data-sk]').forEach(th => th.addEventListener('
   if (KB.sortKey === k) KB.sortDir *= -1; else { KB.sortKey = k; KB.sortDir = 1; }
   renderKB();
 }));
+// Dismiss any open project-edit popup: Escape, or a click outside it.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll('.kb-attach[open]').forEach(d => { d.open = false; });
+});
+document.addEventListener('click', e => {
+  document.querySelectorAll('.kb-attach[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
+});
 loadKB();
 </script>
