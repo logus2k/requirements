@@ -8,7 +8,7 @@
 <title>Architecture · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
-if(!new URLSearchParams(location.search).get('project'))location.replace('projects.html');</script>
+if(!new URLSearchParams(location.search).get('project'))location.replace('overview.html');</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -28,7 +28,7 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
   header .runs{margin-left:auto;display:flex;gap:10px}
   main{padding:22px;max-width:1000px;margin:0 auto}
   .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;
-    padding:9px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+    padding:3px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
   .btn:hover{filter:brightness(1.06)}
   .btn.ghost{background:transparent;color:var(--ink);border-color:var(--border)}
   .btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
@@ -68,11 +68,10 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
   <div><h1 id="ptitle">Architecture</h1></div>
   <div class="runs">
     <button class="btn" id="run">▶ Run Architect</button>
-    <a class="btn ghost" href="overview.html" id="toPipeline" title="Project pipeline">← Pipeline</a>
   </div>
 </header>
 <main>
-  <div class="card"><div class="status" id="status">—</div></div>
+  <div class="card"><div class="status" id="astatus">—</div></div>
   <h3 class="sec">Open issues (<span id="issueCount">0</span>)</h3>
   <div id="issues"><div class="none">—</div></div>
   <h3 class="sec">System overview</h3>
@@ -88,11 +87,11 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
 <script>
 const $ = id => document.getElementById(id);
 const pid = new URLSearchParams(location.search).get('project');
-if (!pid) location.href = 'projects.html';
+if (!pid) location.href = 'overview.html';
 
 const ARCHITECT = '/architect';   // edge route to the Architect service
 
-function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); }
+function setStatus(text, cls) { const s = $('astatus'); s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); }
 
 // --- render the committed architecture output ---
 function renderIssues(list) {

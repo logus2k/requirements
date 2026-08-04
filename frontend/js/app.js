@@ -532,10 +532,9 @@
 
   function showNoRun() {
     document.getElementById('norun').hidden = false;
-    document.getElementById('tabbar').style.display = 'none';
+    const _ct = document.getElementById('chartsToggle'); if (_ct) _ct.hidden = true;
     ['dashboard', 'overlaps', 'setlevel'].forEach(t => document.getElementById('tab-' + t).hidden = true);
     const hw = document.querySelector('.hwrap'); if (hw) hw.style.visibility = 'hidden';
-    // the chart toggle now lives inside the tabbar, which is hidden above — no separate hide needed
   }
 
   // ---- one-time wiring (independent of which document is loaded) ----
@@ -577,6 +576,12 @@
     document.body.classList.toggle('charts-collapsed');   // CSS swaps the up/down-circle icon
     resizeCharts();
   };
+
+  // Show the chart-collapse toggle (nav.js docks it into the Requirements sub-tab bar).
+  // showNoRun() re-hides it when there is no quality run to chart.
+  document.getElementById('chartsToggle').hidden = false;
+  // Requirements→Overlaps is a VIEW of this page — the nav sub-tab links here with ?view=overlaps.
+  if (new URLSearchParams(location.search).get('view') === 'overlaps') switchTab('overlaps');
   // The shared top nav (js/nav.js) owns the theme toggle; re-render on its event.
   window.addEventListener('reqoach:theme', () => {
     hEl.style.color = scoreColor(health);
@@ -651,6 +656,6 @@
         loadRun(startVal);
       }).catch(() => showNoRun());
   } else {                                     // projects mode: no project selected -> the switcher
-    location.replace('projects.html');         // body stays hidden -> no dashboard flash
+    location.replace('overview.html');         // body stays hidden -> no dashboard flash
   }
 })();

@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
 // project-scoped: with no project, go to the switcher BEFORE render (no page flash)
-if(!new URLSearchParams(location.search).get('project'))location.replace('projects.html');</script>
+if(!new URLSearchParams(location.search).get('project'))location.replace('overview.html');</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -72,7 +72,7 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;
 const pid = new URLSearchParams(location.search).get('project');
 const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
 
-if (!pid) { location.href = 'projects.html'; }
+if (!pid) { location.href = 'overview.html'; }
 
 function renderDocs(docs) {
   $('count').textContent = docs.length;
@@ -90,7 +90,7 @@ function loadProject() {
     $('ptitle').textContent = p.name || 'Documents';
     document.title = (p.name || 'Documents') + ' · reqoach';
     renderDocs(p.documents || []);
-  }).catch(() => { location.href = 'projects.html'; });
+  }).catch(() => { location.href = 'overview.html'; });
 }
 
 async function upload(files) {

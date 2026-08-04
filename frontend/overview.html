@@ -9,9 +9,7 @@
 <meta charset="utf-8">
 <title>Overview · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
-// project-scoped: with no project, go to the switcher BEFORE render (no page flash)
-if(!new URLSearchParams(location.search).get('project'))location.replace('projects.html');</script>
+<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -109,14 +107,14 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
   .manage-hint a{color:var(--accent);font-weight:600}
   .node button.disabled,.runall:disabled,.delbtn:disabled{opacity:.45;cursor:not-allowed}
   .runall{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:7px;
-    padding:5px 15px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px}
+    padding:3px 15px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px}
   .runall:hover{filter:brightness(1.06)} .runall:disabled{opacity:.5;cursor:not-allowed;filter:none}
   .abortall{border:1px solid var(--s1);background:transparent;color:var(--s1);border-radius:10px;
-    padding:11px 18px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+    padding:3px 15px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
   .abortall:hover{background:color-mix(in srgb,var(--s1) 12%,transparent)}
   .abortall:disabled{opacity:.5;cursor:default}
   .delbtn{border:1px solid var(--s1);background:var(--s1);color:#fff;border-radius:7px;
-    padding:5px 15px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
+    padding:3px 15px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
   .delbtn:hover{filter:brightness(1.06)} .delbtn:disabled{opacity:.5;cursor:default;filter:none}
 
   .note{background:var(--surface);border:1px solid var(--border);border-radius:11px;
@@ -155,7 +153,6 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const pid = new URLSearchParams(location.search).get('project');
-if (!pid) location.replace('projects.html');
 const Q = '?project=' + encodeURIComponent(pid);
 const when = iso => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
 
@@ -683,7 +680,7 @@ $('delProject').addEventListener('click', async () => {
     // Remove the project's git repo too (reqoach lifecycle). Best-effort: the project is
     // already gone; a failed repo delete is a stray dir, not a user-facing error.
     try { await fetch('repos/' + encodeURIComponent(pid), { method: 'DELETE' }); } catch (e) {}
-    location.replace('projects.html');
+    location.replace('overview.html');
   } catch (e) { b.disabled = false; b.textContent = '🗑 Delete'; alert('Could not delete project:\n' + e.message); }
 });
 
@@ -694,5 +691,15 @@ document.querySelectorAll('.sec-head').forEach(h => h.addEventListener('click', 
   h.nextElementSibling.classList.toggle('hidden', collapsed);
 }));
 
-loadState().catch(() => location.replace('projects.html'));
+if (pid) {
+  loadState().catch(() => location.replace('overview.html'));
+} else {
+  // Home landing — no project selected yet. nav.js sets the title to "Select a Project";
+  // show a placeholder and disable the project actions until one is picked from the menu.
+  $('delProject').disabled = true;
+  $('runAll').disabled = true;
+  $('pipe').innerHTML = '<div style="color:var(--muted);padding:16px 2px;font-size:13px">'
+    + 'Select a project from the menu above to view and run its pipeline.</div>';
+  $('pipe-architect').innerHTML = '';
+}
 </script>

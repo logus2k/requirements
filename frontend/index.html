@@ -29,9 +29,9 @@
   header{display:flex;align-items:center;gap:14px;padding:10px 16px 10px 12px;border-bottom:1px solid var(--border);flex:none}
   header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
   header .doc{color:var(--ink2);font-size:13px}
-  .hwrap{margin-left:auto;display:flex;gap:26px;align-items:flex-start}
-  .health{text-align:right}
-  .health .n{font-size:30px;font-weight:700;line-height:1}
+  .hwrap{margin-left:auto;display:flex;gap:26px;align-items:center}
+  .health{display:flex;align-items:center;gap:10px}
+  .health .n{font-size:24px;font-weight:700;line-height:1}
   .health .l{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
   .toggle{border:1px solid var(--border);background:var(--surface);color:var(--ink);
     border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px}
@@ -191,14 +191,11 @@
   .muted{color:var(--muted)}
   .linkbtn{border:none;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0;font-weight:600}
   .linkbtn:hover{text-decoration:underline}
-  /* Tabs: Dashboard | Overlaps | Set-level (no sliding panels) */
-  .tabbar{flex:none;display:flex;align-items:center;gap:2px;padding:0 22px;border-bottom:1px solid var(--border);background:var(--surface)}
-  .tabbar .caret{margin-left:auto}                              /* push the chart toggle to the right */
-  /* the chart toggle only applies to the Dashboard tab's chart row */
-  body[data-tab="overlaps"] .tabbar .caret, body[data-tab="setlevel"] .tabbar .caret{display:none}
-  .tabbtn{background:none;border:none;padding:11px 15px;color:var(--muted);font:inherit;font-size:13.5px;
-    font-weight:600;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
-  .tabbtn:hover{color:var(--ink)} .tabbtn.active{color:var(--ink);border-bottom-color:var(--accent)}
+  /* Dashboard | Overlaps are views selected from the Requirements sub-tab bar (nav.js). */
+  /* The chart-collapse toggle (#chartsToggle) is docked into that bar and applies only to
+     the Dashboard's chart row — hide it on the Overlaps view. */
+  body[data-tab="overlaps"] .caret, body[data-tab="setlevel"] .caret{display:none}
+  .caret[hidden]{display:none}   /* the class sets display:inline-grid, which would otherwise beat the UA [hidden] rule */
   .tabpane{flex:1;min-height:0;display:flex;flex-direction:column}
   .tabpane[hidden]{display:none}
   #ovBody,#slBody{flex:1;min-height:0;overflow:auto;padding:18px 22px}
@@ -224,23 +221,18 @@
 <body>
 <header>
   <div><h1 id="ptitle">Requirements Quality</h1>
-    <div class="docpick" id="docpick" data-open="false">
+    <div class="docpick" id="docpick" data-open="false" style="display:none">
       <button class="docpick-btn" id="docpickBtn" aria-haspopup="listbox" aria-expanded="false" title="Select document">
         <span class="docpick-label" id="docpickLabel"></span><span class="docpick-caret"></span>
       </button>
       <div class="docpick-menu" id="docpickMenu" role="listbox" hidden></div>
     </div></div>
   <div class="hwrap">
-    <div class="health"><div class="n" id="ruleconf"></div><div class="l">rule conformance</div></div>
-    <div class="health"><div class="n" id="health"></div><div class="l">avg quality / 5</div></div>
+    <div class="health"><div class="l">rule conformance</div><div class="n" id="ruleconf"></div></div>
+    <div class="health"><div class="l">avg quality / 5</div><div class="n" id="health"></div></div>
   </div>
 </header>
-<div class="tabbar" id="tabbar">
-  <button class="tabbtn active" data-tab="dashboard">Dashboard</button>
-  <button class="tabbtn" data-tab="overlaps">Overlaps</button>
-  <button class="tabbtn" data-tab="setlevel">Set-level</button>
-  <button class="caret" id="chartsToggle" title="Collapse / expand the chart row"></button>
-</div>
+<button class="caret" id="chartsToggle" title="Collapse / expand the chart row" hidden></button>
 <div class="norun" id="norun" hidden>No quality run yet for this project. Open <b>Documents</b> and click <b>▶ Run Quality</b>.</div>
 <div class="tabpane" id="tab-dashboard">
 <section class="charts">

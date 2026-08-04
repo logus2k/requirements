@@ -29,54 +29,63 @@
     { label: "Deployment",   href: "deployment.html",   match: ["deployment.html"],   soon: true },
     { label: "Operation",    href: "operation.html",    match: ["operation.html"],    soon: true },
   ];
-  // Sub-tabs inside the Requirements section (third row).
+  // Sub-tabs inside the Requirements section (third row). "Overlaps" is a VIEW of the Quality
+  // page (index.html?view=overlaps); the others are their own pages.
+  const urlView = new URLSearchParams(location.search).get("view") || "";
   const REQ_TABS = [
-    { label: "Quality",  href: "index.html",    match: "index.html" },
-    { label: "Review",   href: "review.html",   match: "review.html" },
-    { label: "Coverage", href: "coverage.html", match: "coverage.html" },
-    { label: "Editor",   href: "editor.html",   match: "editor.html" },
+    { label: "Quality",  file: "index.html",    view: "" },
+    { label: "Review",   file: "review.html",   view: "" },
+    { label: "Overlaps", file: "index.html",    view: "overlaps" },
+    { label: "Coverage", file: "coverage.html", view: "" },
+    { label: "Editor",   file: "editor.html",   view: "" },
   ];
+  const reqHref = t => t.file + (pid ? "?project=" + encodeURIComponent(pid) : "")
+    + (t.view ? (pid ? "&" : "?") + "view=" + t.view : "");
+  const reqActive = t => t.file === cur && (t.file !== "index.html" || (t.view || "") === urlView);
 
   // Row 1: brand (left); project selector + auth + theme (right).
   const nav = document.createElement("nav");
   nav.className = "reqoach-nav";
   nav.innerHTML =
-    '<a class="brand" href="projects.html">reqoach</a>' +
+    '<a class="brand" href="overview.html">FACTORY</a>' +
     '<span class="spacer"></span>' +
     '<div class="usermenu" id="reqoach-user"></div>';
   document.body.prepend(nav);
 
-  // The active project is chosen from the banner title (#ptitle) — see the selector below.
-  if (pid) {
-    const titleEl = document.getElementById("ptitle");
-    if (titleEl) {
-      titleEl.classList.add("project-select");
-      titleEl.title = "Switch project";
-      let pop = null;
-      const close = () => { if (pop) { pop.remove(); pop = null; } };
-      titleEl.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (pop) { close(); return; }
-        pop = document.createElement("div"); pop.className = "project-pop";
-        pop.innerHTML = '<div class="pp-note">Loading…</div>';
-        titleEl.appendChild(pop);
-        try {
-          const list = await fetch("/analyst/projects").then(r => r.ok ? r.json() : { projects: [] });
-          const page = location.pathname.split("/").pop() || "overview.html";
-          const rows = (list.projects || []).map(p =>
-            `<a class="pp-item${p.id === pid ? " active" : ""}" href="${page}?project=${encodeURIComponent(p.id)}">${esc(p.name || "project")}</a>`).join("");
-          pop.innerHTML = (rows || '<div class="pp-note">No projects</div>')
-            + '<a class="pp-item pp-all" href="projects.html">Manage projects…</a>';
-        } catch (err) { pop.innerHTML = '<div class="pp-note">Failed to load</div>'; }
-      });
-      document.addEventListener("click", close);
-      // Show the active project's NAME in the banner on every page (same as Overview).
+  // The active project is chosen from the banner title (#ptitle). The selector works with OR
+  // without a project: with none, the title reads "Select a Project" (the home/Overview landing).
+  const titleEl = document.getElementById("ptitle");
+  if (titleEl) {
+    titleEl.classList.add("project-select");
+    titleEl.title = pid ? "Switch project" : "Select a project";
+    if (!pid) titleEl.textContent = "Select a Project";
+    let pop = null;
+    const close = () => { if (pop) { pop.remove(); pop = null; } };
+    titleEl.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (pop) { close(); return; }
+      pop = document.createElement("div"); pop.className = "project-pop";
+      pop.innerHTML = '<div class="pp-note">Loading…</div>';
+      titleEl.appendChild(pop);
+      try {
+        const list = await fetch("/analyst/projects").then(r => r.ok ? r.json() : { projects: [] });
+        const page = location.pathname.split("/").pop() || "overview.html";
+        const rows = (list.projects || []).map(p =>
+          `<a class="pp-item${p.id === pid ? " active" : ""}" href="${page}?project=${encodeURIComponent(p.id)}">${esc(p.name || "project")}</a>`).join("");
+        pop.innerHTML = (rows || '<div class="pp-note">No projects</div>')
+          + '<a class="pp-item pp-all" href="projects.html">Manage projects…</a>';
+      } catch (err) { pop.innerHTML = '<div class="pp-note">Failed to load</div>'; }
+    });
+    document.addEventListener("click", close);
+    // With a project, show its NAME in the banner on every page (same as Overview).
+    if (pid) {
       fetch("/analyst/projects/" + encodeURIComponent(pid)).then(r => r.ok ? r.json() : null)
         .then(p => { if (p && p.name && !pop) titleEl.textContent = p.name; }).catch(() => {});
     }
   }
 
   // Row 2: lifecycle phases (only with a project selected).
+  let subsEl = null;
   if (pid) {
     const phases = document.createElement("div");
     phases.className = "reqoach-phases";
@@ -91,12 +100,12 @@
     (header || nav).insertAdjacentElement("afterend", phases);
 
     // Row 3: Requirements sub-tabs, only on a Requirements page.
-    if (REQ_TABS.some(t => t.match === cur)) {
-      const subs = document.createElement("div");
-      subs.className = "reqoach-subtabs";
-      subs.innerHTML = REQ_TABS.map(t =>
-        `<a class="subtab${t.match === cur ? " active" : ""}" href="${t.href}${q}">${t.label}</a>`).join("");
-      phases.insertAdjacentElement("afterend", subs);
+    if (REQ_TABS.some(t => t.file === cur)) {
+      subsEl = document.createElement("div");
+      subsEl.className = "reqoach-subtabs";
+      subsEl.innerHTML = REQ_TABS.map(t =>
+        `<a class="subtab${reqActive(t) ? " active" : ""}" href="${reqHref(t)}">${t.label}</a>`).join("");
+      phases.insertAdjacentElement("afterend", subsEl);
     }
   }
 
@@ -187,6 +196,21 @@
 
   // If the page has a connection LED (#status), relocate it into the nav so it sits
   // in the SAME position on every page — at the far right, after the Theme button.
+  // Connection LED: dock it at the RIGHT of the sub-tab bar when there is one (e.g. Editor);
+  // otherwise keep it in the top nav.
   const led = document.getElementById("status");
-  if (led) { nav.appendChild(led); led.removeAttribute("hidden"); }
+  if (led) {
+    (subsEl || nav).appendChild(led);
+    led.removeAttribute("hidden");
+    if (subsEl) led.style.marginLeft = "auto";
+  }
+
+  // The Quality page (index.html) has a chart-collapse toggle (#chartsToggle) that belongs at
+  // the RIGHT of the Requirements sub-tab bar. Dock it here — deterministic, since subsEl was
+  // just built above (app.js can't reliably do it: it runs before this script builds the bar).
+  const caret = document.getElementById("chartsToggle");
+  if (caret && subsEl) {
+    subsEl.appendChild(caret);
+    caret.style.marginLeft = led ? "12px" : "auto";
+  }
 })();

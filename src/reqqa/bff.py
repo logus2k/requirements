@@ -25,6 +25,7 @@ import os
 
 import httpx
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -51,6 +52,19 @@ _DROP = {"host", "content-length", "transfer-encoding", "connection",
 _DROP_RESPONSE = _DROP | {"content-encoding"}
 
 app = FastAPI(title="reqoach-bff")
+
+
+@app.middleware("http")
+async def _revalidate_ui(request, call_next):
+    """Make browsers revalidate the frequently-edited UI assets (HTML/CSS/app JS) instead of
+    serving a stale cached copy — otherwise a UI change only shows after a hard refresh. The
+    ETag/Last-Modified StaticFiles already sends means revalidation is a cheap 304 when
+    unchanged. Big vendored libraries (under /vendor/) keep normal caching."""
+    resp = await call_next(request)
+    path = request.url.path
+    if (path == "/" or path.endswith((".html", ".css")) or path.startswith("/js/")):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
 _client: httpx.AsyncClient | None = None
 
 
@@ -123,6 +137,13 @@ for _p in PROXIED:
 # routes win over the "/" catch-all.
 from . import lifecycle  # noqa: E402  (after _forward routes, before the static mount)
 app.include_router(lifecycle.router)
+
+# Home is the Overview page (with the project selector defaulting to "Select a Project"),
+# NOT the raw index (Quality) page the static mount would otherwise serve at "/".
+@app.get("/", include_in_schema=False)
+def _root() -> RedirectResponse:
+    return RedirectResponse(url="overview.html", status_code=302)
+
 
 # Static frontend LAST — it is the catch-all.
 app.mount("/", StaticFiles(directory=_FRONTEND, html=True), name="frontend")

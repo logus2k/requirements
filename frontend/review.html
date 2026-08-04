@@ -6,7 +6,7 @@
 <title>Review · reqoach</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
-if(!new URLSearchParams(location.search).get('project'))location.replace('projects.html');</script>
+if(!new URLSearchParams(location.search).get('project'))location.replace('overview.html');</script>
 <link rel="stylesheet" href="css/nav.css">
 <style>
   :root{
@@ -111,7 +111,7 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
 </style>
 
 <header>
-  <div><h1 id="ptitle">Review</h1><div class="sub" id="rsub"></div></div>
+  <div><h1 id="ptitle">Review</h1><div class="sub" id="rsub" style="display:none"></div></div>
   <div class="prog" id="hprog"></div>
   <label class="thctl" title="Acceptance threshold for this project — requirements below it are not releasable">
     Threshold
@@ -211,7 +211,7 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;
 const q = new URLSearchParams(location.search);
 const pid = q.get('project');
 let run = q.get('run') || null;
-if (!pid) location.replace('projects.html');
+if (!pid) location.replace('overview.html');
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const scoreColor = s => s == null ? cssVar('--muted') : cssVar('--s' + Math.max(1, Math.min(5, Math.round(s))));
 const CHARS = [['C1','Necessary'],['C2','Appropriate'],['C3','Unambiguous'],['C4','Complete'],
