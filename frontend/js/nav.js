@@ -70,6 +70,9 @@
         } catch (err) { pop.innerHTML = '<div class="pp-note">Failed to load</div>'; }
       });
       document.addEventListener("click", close);
+      // Show the active project's NAME in the banner on every page (same as Overview).
+      fetch("/analyst/projects/" + encodeURIComponent(pid)).then(r => r.ok ? r.json() : null)
+        .then(p => { if (p && p.name && !pop) titleEl.textContent = p.name; }).catch(() => {});
     }
   }
 

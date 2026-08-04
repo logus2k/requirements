@@ -17,7 +17,7 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
     --grid:#2c2c2a;--border:rgba(255,255,255,.10);--accent:#3987e5;--panel2:rgba(255,255,255,.06)}
   *{box-sizing:border-box}
   body{margin:0;background:var(--plane);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-  header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  header{display:flex;align-items:center;gap:14px;padding:10px 16px 10px 12px;border-bottom:1px solid var(--border)}
   header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
   header .status{margin-left:auto;color:var(--muted);font-size:12.5px}
   .tabbar{display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--border);background:var(--surface)}
@@ -110,7 +110,7 @@ const sevColor=s=>({critical:cssVar('--s1'),high:cssVar('--s2'),medium:cssVar('-
 Promise.all([
   fetch('/analyst/catalog/archetypes').then(r=>r.json()).then(d=>{(d.archetypes||[]).forEach(a=>ARCHE[a.id]=a.name)}).catch(()=>{}),
   fetch('/analyst/catalog/domains').then(r=>r.json()).then(d=>{(d.domains||[]).forEach(x=>DOMS[x.id]=x.name)}).catch(()=>{}),
-  fetch('/analyst/projects/'+encodeURIComponent(pid)).then(r=>r.ok?r.json():null).then(p=>{ if(p){$('ptitle').textContent='Coverage · '+p.name; document.title=p.name+' — Coverage';}}).catch(()=>{}),
+  fetch('/analyst/projects/'+encodeURIComponent(pid)).then(r=>r.ok?r.json():null).then(p=>{ if(p){$('ptitle').textContent=p.name; document.title=p.name+' — Coverage';}}).catch(()=>{}),
 ]).then(loadStatement);
 
 function loadStatement(){

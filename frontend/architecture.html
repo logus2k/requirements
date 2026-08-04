@@ -23,7 +23,7 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('projec
   *{box-sizing:border-box}
   body{margin:0;background:var(--plane);color:var(--ink);
     font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-  header{display:flex;align-items:center;gap:14px;padding:16px 22px;border-bottom:1px solid var(--border)}
+  header{display:flex;align-items:center;gap:14px;padding:10px 16px 10px 12px;border-bottom:1px solid var(--border)}
   header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
   header .runs{margin-left:auto;display:flex;gap:10px}
   main{padding:22px;max-width:1000px;margin:0 auto}
@@ -244,7 +244,7 @@ $('run').addEventListener('click', async () => {
 
 // title + initial view
 fetch('/analyst/projects/' + encodeURIComponent(pid)).then(r => r.ok ? r.json() : null).then(p => {
-  if (p && p.name) { $('ptitle').textContent = p.name + ' · Architecture'; document.title = p.name + ' · Architecture'; }
+  if (p && p.name) { $('ptitle').textContent = p.name; document.title = p.name + ' · Architecture'; }
 }).catch(() => {});
 setStatus('Ready. Click Run Architect to design the architecture from the current requirements.');
 loadView();
