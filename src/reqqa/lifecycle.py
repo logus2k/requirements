@@ -142,6 +142,34 @@ def architecture_view(pid: str) -> dict:
             "open_issues": open_issues, "system_overview": system_overview, "aspects": aspects}
 
 
+@router.get("/repos/{pid}/plan")
+def plan_view(pid: str) -> dict:
+    """Read the committed plan.json (Planner output) for the UI — summary, tasks (with
+    deliverable / acceptance / traces / feasibility), open questions, flagged items, and the
+    readiness/architecture provenance. Empty structure if the Planner has not run yet."""
+    empty = {"exists": False, "summary": {}, "tasks": [], "questions": [], "flagged": [],
+             "coverage_gaps": [], "source": {}, "architecture": {}, "graph": {}}
+    path = os.path.join(repo.repo_path(pid), "plans", "plan.json")
+    if not os.path.isfile(path):
+        return empty
+    try:
+        plan = json.load(open(path))
+    except (ValueError, OSError):
+        return empty
+    return {
+        "exists": True,
+        "contract_version": plan.get("contract_version"),
+        "summary": plan.get("summary", {}),
+        "source": plan.get("source", {}),
+        "architecture": plan.get("architecture", {}),
+        "tasks": plan.get("tasks", []),
+        "questions": plan.get("questions", []),
+        "flagged": plan.get("flagged", []),
+        "coverage_gaps": plan.get("coverage_gaps", []),
+        "graph": plan.get("graph", {}),
+    }
+
+
 @router.get("/repos/{pid}")
 def repo_status(pid: str) -> dict:
     """Repo path + unfinished pending actions (e.g. create the GitHub remote)."""

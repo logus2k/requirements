@@ -1,0 +1,286 @@
+<!-- Planning — project-scoped. Triggers the Planner Agent (a per-requirement decompose +
+     gate/refine run) and shows its committed output: the task backlog handed to the Builder —
+     each task with its deliverable, acceptance, dependencies and requirement traceability, plus
+     open questions and flagged items. The Planner runs as an HTTP service at the /planner/ edge
+     route (POST planner:run + GET jobs/{id}); its output is read from the project repo via
+     FACTORY (GET /factory/repos/{pid}/plan). -->
+<meta charset="utf-8">
+<title>Planning · FACTORY</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>document.documentElement.dataset.theme=(document.cookie.split('; ').find(c=>c.startsWith('reqoach-theme='))||'=light').split('=')[1];
+if(!new URLSearchParams(location.search).get('project'))location.replace('overview.html');</script>
+<link rel="stylesheet" href="css/nav.css">
+<style>
+  :root{
+    --surface:#fcfcfb; --plane:#e9e9e9; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --border:rgba(11,11,11,.10); --accent:#2a78d6; --s1:#d03b3b; --s3:#fab219; --s4:#6bbf59;
+    --panel2:rgba(11,11,11,.05);
+  }
+  html[data-theme="dark"]{
+    --surface:#1a1a19; --plane:#0d0d0d; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+    --border:rgba(255,255,255,.10); --accent:#3987e5; --panel2:rgba(255,255,255,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:10px 16px 10px 12px;border-bottom:1px solid var(--border)}
+  header h1{font-size:16px;margin:0 0 0 5px;font-weight:600}
+  header .runs{margin-left:auto;display:flex;gap:10px}
+  main{padding:22px;max-width:1000px;margin:0 auto}
+  .btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;
+    padding:3px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .btn:hover{filter:brightness(1.06)}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+  h3.sec{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:22px 0 8px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:8px 0}
+  .status{font-size:13px;color:var(--ink2)}
+  .status.err{color:var(--s1)}
+  .status.ok{color:var(--s4)}
+  .none{color:var(--muted);padding:14px 2px;font-size:13.5px}
+  /* summary strip */
+  .summary{display:flex;flex-wrap:wrap;gap:26px;align-items:baseline}
+  .summary .m{display:flex;flex-direction:column;gap:2px}
+  .summary .n{font-size:22px;font-weight:700;line-height:1}
+  .summary .l{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .prov{color:var(--ink2);font-size:12.5px;margin-top:10px}
+  .prov b{color:var(--ink)}
+  .warn{color:var(--s3)}
+  /* filter chips */
+  .filters{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 4px}
+  .fchip{border:1px solid var(--border);background:var(--surface);border-radius:20px;padding:2px 12px;
+    font-size:12px;font-weight:600;color:var(--ink2);cursor:pointer;user-select:none}
+  .fchip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* task card */
+  .task{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:8px 0}
+  .task .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tid{font:12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+  .ttitle{font-weight:600;font-size:13.5px}
+  .kind{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;
+    border-radius:5px;padding:2px 7px;background:var(--panel2);color:var(--ink2)}
+  .kind.code{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+  .kind.schema{background:color-mix(in srgb,var(--s4) 20%,transparent);color:var(--s4)}
+  .kind.test{background:color-mix(in srgb,var(--s3) 22%,transparent);color:#a5760a}
+  .deliv{font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);margin:6px 0 2px}
+  .by{font-size:11px;color:var(--muted);font-family:system-ui}
+  .by.arch{color:var(--accent);font-weight:600}
+  .meta{font-size:12px;color:var(--ink2);margin-top:4px}
+  .chip{display:inline-block;background:var(--panel2);border-radius:6px;padding:1px 8px;margin:2px 4px 2px 0;
+    font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .acc{font-size:12px;color:var(--ink2);margin-top:5px}
+  .acc code{background:var(--panel2);border-radius:5px;padding:1px 6px;font-size:11.5px}
+  .instr{font-size:12.5px;color:var(--ink2);margin-top:5px}
+  .qrow,.frow{border-left:3px solid var(--s3);padding:6px 12px;margin:6px 0;background:var(--panel2);
+    border-radius:0 6px 6px 0;font-size:13px}
+  .frow{border-left-color:var(--s1)}
+  /* gap resolutions */
+  .grsummary{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 8px}
+  .grpill{font-size:11.5px;font-weight:700;border-radius:20px;padding:2px 11px;background:var(--panel2);color:var(--ink2)}
+  .grrow{border-left:3px solid var(--muted);padding:7px 12px;margin:6px 0;background:var(--panel2);
+    border-radius:0 6px 6px 0;font-size:13px}
+  .grrow .grtop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .grdisp{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;border-radius:5px;padding:1px 7px;color:#fff}
+  .grdisp.refine{background:var(--accent)} .grdisp.author{background:#7c5cd0}
+  .grdisp.needs_input{background:var(--s3);color:#5a4300} .grdisp.dismiss{background:var(--muted)}
+  .grdisp.wont_do{background:var(--s1)}
+  .grrow.refine{border-left-color:var(--accent)} .grrow.author{border-left-color:#7c5cd0}
+  .grrow.needs_input{border-left-color:var(--s3)} .grrow.dismiss{border-left-color:var(--muted)}
+  .grrow.wont_do{border-left-color:var(--s1)}
+  .grrat{color:var(--ink2);margin-top:4px;font-size:12.5px}
+  .grnew{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);margin-top:4px;
+    background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 8px}
+  .grapplied{font-size:11px;color:var(--s4);font-weight:600}
+</style>
+
+<header>
+  <div><h1 id="ptitle">Planning</h1></div>
+  <div class="runs">
+    <button class="btn" id="run">▶ Run Planner</button>
+  </div>
+</header>
+<main>
+  <div class="card"><div class="status" id="pstatus">—</div></div>
+
+  <h3 class="sec">Summary</h3>
+  <div class="card" id="summaryCard"><div class="none">No plan yet. Click <b>Run Planner</b>.</div></div>
+
+  <h3 class="sec">Tasks (<span id="taskCount">0</span>) — ready for the Builder</h3>
+  <div class="filters" id="filters"></div>
+  <div id="tasks"></div>
+
+  <h3 class="sec">Open questions (<span id="qCount">0</span>)</h3>
+  <div id="questions"><div class="none">—</div></div>
+
+  <h3 class="sec">Flagged (<span id="fCount">0</span>)</h3>
+  <div id="flagged"><div class="none">—</div></div>
+
+  <h3 class="sec">Requirement gap resolutions (<span id="grCount">0</span>)</h3>
+  <div class="grsummary" id="grSummary"></div>
+  <div id="gapres"><div class="none">The Planner→Analyst loop routes genuine “too thin to build” questions back to the Analyst. Run the Planner with the loop enabled (⚙ Project settings) to populate this.</div></div>
+</main>
+
+<script src="js/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pid = new URLSearchParams(location.search).get('project');
+if (!pid) location.href = 'overview.html';
+
+const PLANNER = '/planner';   // edge route to the Planner service
+let PLAN = null;              // the loaded plan view
+let kindFilter = 'all';
+
+function setStatus(text, cls) { const s = $('pstatus'); s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); }
+
+function renderSummary(v) {
+  const s = v.summary || {}, src = v.source || {}, arch = v.architecture || {};
+  const metric = (n, l) => `<div class="m"><div class="n">${n == null ? '—' : n}</div><div class="l">${l}</div></div>`;
+  const ready = src.architect_ready
+    ? '<b>architect-ready</b>'
+    : `<span class="warn">draft input</span> (architect_ready: false${src.release_status ? ', release ' + esc(src.release_status) : ''})`;
+  const named = arch.components_named != null ? `${arch.components_named} components` : '—';
+  $('summaryCard').innerHTML =
+    `<div class="summary">${metric(s.feasible, 'Feasible tasks')}${metric(s.questions, 'Open questions')}`
+    + `${metric(s.flagged, 'Flagged')}${metric(s.coverage_gaps, 'Coverage gaps')}</div>`
+    + `<div class="prov">Input: ${ready} · Architecture handover: <b>${esc(arch.contract_version || 'none')}</b> (${named}). `
+    + `Tasks trace to Analyst requirement ids; deliverables named by the Architect win.</div>`;
+}
+
+function taskCard(t) {
+  const kind = (t.kind || 'code').toLowerCase();
+  const by = t.deliverable_named_by === 'architect'
+    ? '<span class="by arch">named by Architect</span>' : '<span class="by">named by Planner</span>';
+  const traces = (t.traces_to || []).map(r => `<span class="chip">${esc(r)}</span>`).join('');
+  const deps = (t.depends_on || []).map(d => `<span class="chip">${esc(d)}</span>`).join('');
+  const acc = t.acceptance || {};
+  const accHtml = acc.check
+    ? `<div class="acc">Acceptance: <code>${esc(acc.check)}</code>${acc.source ? ' · <span class="by' + (acc.source === 'architect' ? ' arch' : '') + '">' + esc(acc.source) + '</span>' : ''}</div>`
+    : '';
+  return `<div class="task" data-kind="${esc(kind)}">
+    <div class="top"><span class="tid">${esc(t.task_id || '')}</span>
+      <span class="kind ${esc(kind)}">${esc(kind)}</span>
+      <span class="ttitle">${esc(t.title || '')}</span></div>
+    <div class="deliv">${esc(t.deliverable || '')} &nbsp;${by}</div>
+    <div class="meta">Traces: ${traces || '—'}${deps ? ' &nbsp;·&nbsp; Depends on: ' + deps : ''}</div>
+    ${accHtml}
+    ${t.instructions ? `<div class="instr">${esc(t.instructions)}</div>` : ''}
+  </div>`;
+}
+
+function renderTasks() {
+  const tasks = (PLAN.tasks || []).filter(t => kindFilter === 'all' || (t.kind || 'code').toLowerCase() === kindFilter);
+  $('taskCount').textContent = (PLAN.tasks || []).length;
+  const box = $('tasks');
+  box.innerHTML = tasks.length ? tasks.map(taskCard).join('')
+    : '<div class="none">No tasks' + (kindFilter === 'all' ? ' yet.' : ' of this kind.') + '</div>';
+}
+
+function renderFilters() {
+  const kinds = {};
+  (PLAN.tasks || []).forEach(t => { const k = (t.kind || 'code').toLowerCase(); kinds[k] = (kinds[k] || 0) + 1; });
+  const chips = [['all', (PLAN.tasks || []).length]].concat(Object.entries(kinds).sort());
+  $('filters').innerHTML = chips.map(([k, n]) =>
+    `<span class="fchip${k === kindFilter ? ' active' : ''}" data-k="${esc(k)}">${esc(k)} ${n}</span>`).join('');
+  $('filters').querySelectorAll('.fchip').forEach(c =>
+    c.addEventListener('click', () => { kindFilter = c.dataset.k; renderFilters(); renderTasks(); }));
+}
+
+function renderList(box, items, cls, fmt) {
+  box.innerHTML = items.length ? items.map(fmt).join('') : '<div class="none">None.</div>';
+}
+
+function renderPlan(v) {
+  PLAN = v;
+  renderSummary(v);
+  renderFilters();
+  renderTasks();
+  const qs = v.questions || [], fl = v.flagged || [];
+  $('qCount').textContent = qs.length;
+  $('fCount').textContent = fl.length;
+  renderList($('questions'), qs, 'qrow', q => `<div class="qrow">${esc(q.question || q.title || q.detail || (typeof q === 'string' ? q : JSON.stringify(q)))}${q.traces_to ? ' <span class="by">' + esc((q.traces_to || []).join(', ')) + '</span>' : ''}</div>`);
+  renderList($('flagged'), fl, 'frow', f => `<div class="frow">${esc(f.title || f.reason || f.detail || (typeof f === 'string' ? f : JSON.stringify(f)))}${f.traces_to ? ' <span class="by">' + esc((f.traces_to || []).join(', ')) + '</span>' : ''}</div>`);
+}
+
+async function loadPlan() {
+  try {
+    const v = await fetch('repos/' + encodeURIComponent(pid) + '/plan').then(r => r.ok ? r.json() : null);
+    if (v && v.exists) { renderPlan(v); setStatus('Plan loaded — ' + (v.summary || {}).feasible + ' feasible tasks.', 'ok'); }
+    else setStatus('No plan yet. Run the Planner to generate the task backlog.');
+  } catch (e) { setStatus('Could not load the plan.', 'err'); }
+  loadGapResolutions();
+}
+
+// The Planner->Analyst gap-resolution outcomes (dispositions the resolver decided for the
+// plan's genuine questions). Persisted by the Analyst; read-only here.
+const DISP_LABEL = { refine: 'refined', author: 'authored', needs_input: 'needs input',
+                     dismiss: 'dismissed', wont_do: "won't do" };
+async function loadGapResolutions() {
+  let g;
+  try { g = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/planner-gaps').then(r => r.ok ? r.json() : null); }
+  catch (e) { g = null; }
+  const records = (g && g.records) || [];
+  $('grCount').textContent = records.length;
+  const counts = (g && g.counts) || {};
+  $('grSummary').innerHTML = Object.keys(counts).length
+    ? Object.entries(counts).map(([k, n]) => `<span class="grpill">${esc(DISP_LABEL[k] || k)}: ${n}</span>`).join('')
+    : '';
+  if (!records.length) return;   // keep the placeholder prompt
+  $('gapres').innerHTML = records.map(r => {
+    const d = (r.disposition || '').toLowerCase();
+    const applied = r.applied ? ' <span class="grapplied">· applied</span>' : '';
+    const q = r.source_question || r.gap || '';
+    const newText = d === 'refine' ? r.refined_text
+                  : d === 'author' ? r.authored_requirement
+                  : d === 'needs_input' ? r.question : '';
+    return `<div class="grrow ${esc(d)}">
+      <div class="grtop"><span class="grdisp ${esc(d)}">${esc(DISP_LABEL[d] || d)}</span>
+        <span class="tid">${esc(r.req_id || '')}</span>${applied}</div>
+      ${q ? `<div class="grrat">${esc(q)}</div>` : ''}
+      ${r.rationale ? `<div class="grrat">${esc(r.rationale)}</div>` : ''}
+      ${newText ? `<div class="grnew">${esc(newText)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// --- trigger + poll the Planner job ---
+async function pollPlanner(jobId) {
+  for (;;) {
+    await new Promise(r => setTimeout(r, 2500));
+    let s; try { s = await fetch(PLANNER + '/jobs/' + jobId).then(r => r.ok ? r.json() : null); } catch (e) { s = null; }
+    if (!s) continue;
+    if (s.status === 'running') {
+      const p = s.progress || {};
+      const PSTAGE = { plan: 'Planning', resolve: 'Resolving requirement gaps',
+                       replan: 'Re-planning affected requirements' };
+      const label = PSTAGE[s.stage] || 'Planning';
+      setStatus('Running — ' + label + (p.total ? ` (${p.done || 0}/${p.total} requirements)` : '…'));
+    } else if (s.status === 'done') {
+      const gr = (s.result && s.result.gap_resolution) || null;
+      const extra = gr && gr.counts
+        ? ' · gaps: ' + Object.entries(gr.counts).map(([k, v]) => v + ' ' + k).join(', ')
+        : '';
+      setStatus('Done — ' + ((s.result && s.result.tasks) || 0) + ' tasks' + extra + '.', 'ok');
+      return s;
+    }
+    else if (s.status === 'error') { setStatus('Failed: ' + (s.error || 'unknown'), 'err'); return s; }
+  }
+}
+$('run').addEventListener('click', async () => {
+  const b = $('run'); b.disabled = true;
+  setStatus('Starting…');
+  try {
+    const res = await fetch(PLANNER + '/projects/' + encodeURIComponent(pid) + '/planner:run', { method: 'POST' });
+    if (res.status === 401 || res.status === 403) { setStatus('Sign in required to run the Planner.', 'err'); b.disabled = false; return; }
+    const j = await res.json();
+    if (!j.job_id) throw new Error('could not start');
+    await pollPlanner(j.job_id);
+    await loadPlan();
+  } catch (e) { setStatus('Failed: ' + e.message, 'err'); }
+  finally { b.disabled = false; }
+});
+
+// title + initial view
+fetch('/analyst/projects/' + encodeURIComponent(pid)).then(r => r.ok ? r.json() : null).then(p => {
+  if (p && p.name) { $('ptitle').textContent = p.name; document.title = p.name + ' · Planning'; }
+}).catch(() => {});
+loadPlan();
+</script>

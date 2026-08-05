@@ -24,7 +24,7 @@
     { label: "Overview",     href: "overview.html",     match: ["overview.html"] },
     { label: "Requirements", href: "index.html",        match: ["index.html", "review.html", "coverage.html", "editor.html"] },
     { label: "Architecture", href: "architecture.html", match: ["architecture.html"] },
-    { label: "Planning",     href: "planning.html",     match: ["planning.html"],    soon: true },
+    { label: "Planning",     href: "planning.html",     match: ["planning.html"] },
     { label: "Development",  href: "development.html",   match: ["development.html"],  soon: true },
     { label: "Deployment",   href: "deployment.html",   match: ["deployment.html"],   soon: true },
     { label: "Operation",    href: "operation.html",    match: ["operation.html"],    soon: true },
@@ -174,15 +174,22 @@
     const authItem = authed
       ? `<a class="um-item" href="/oauth2/sign_out?rd=${rd}">Sign out</a>`
       : `<a class="um-item" href="/oauth2/sign_in?rd=${rd}">Sign in</a>`;
+    // Project-scoped settings (the gap-resolution loop) — only meaningful with a project open.
+    const settingsItem = pid
+      ? `<button type="button" class="um-item" id="um-settings">⚙&#xFE0E;  Project settings</button>`
+      : "";
     box.innerHTML =
       `<button type="button" class="avatarbtn" id="reqoach-avatar" aria-haspopup="true" ` +
         `title="${esc(authed ? me.email : "Account")}">${trigger}</button>` +
       `<div class="um-pop hidden" id="reqoach-pop">${nameBlock}` +
-        `<button type="button" class="um-item" id="um-theme">${themeLabel()}</button>${authItem}</div>`;
+        `<button type="button" class="um-item" id="um-theme">${themeLabel()}</button>` +
+        `${settingsItem}${authItem}</div>`;
     const btn = document.getElementById("reqoach-avatar");
     const pop = document.getElementById("reqoach-pop");
     btn.addEventListener("click", e => { e.stopPropagation(); pop.classList.toggle("hidden"); });
     document.getElementById("um-theme").addEventListener("click", e => { e.stopPropagation(); toggleTheme(); });
+    const sBtn = document.getElementById("um-settings");
+    if (sBtn) sBtn.addEventListener("click", e => { e.stopPropagation(); pop.classList.add("hidden"); openSettings(); });
   }
   // Close the menu on any outside click (bound once).
   document.addEventListener("click", () => {
@@ -193,6 +200,103 @@
     renderUser(me);
     window.dispatchEvent(new CustomEvent("reqoach:auth", { detail: me || null }));
   });
+
+  // --- Project settings modal: the Planner->Analyst gap-resolution loop (per project) --------
+  // Two knobs, each Auto/Manual: (1) TRIGGER — after a plan, automatically route genuine
+  // "requirement too thin to build" questions back to the Analyst resolver; (2) APPLY —
+  // automatically apply the resolver's refinements so the Planner re-plans the affected
+  // requirements. Stored per project via the Analyst (PUT is owner-gated).
+  function ensureSettingsStyles() {
+    if (document.getElementById("reqoach-settings-css")) return;
+    const s = document.createElement("style");
+    s.id = "reqoach-settings-css";
+    s.textContent =
+      ".rs-ov{position:fixed;inset:0;background:rgba(0,0,0,.42);display:grid;place-items:center;z-index:1000}" +
+      ".rs-card{background:var(--surface,#fff);color:var(--ink,#111);border:1px solid var(--border,rgba(0,0,0,.12));" +
+      "border-radius:14px;padding:20px 22px;width:min(440px,92vw);box-shadow:0 18px 50px rgba(0,0,0,.3)}" +
+      ".rs-card h2{margin:0 0 3px;font-size:16px;font-weight:700}" +
+      ".rs-sub{color:var(--muted,#888);font-size:12.5px;margin:0 0 16px}" +
+      ".rs-row{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--border,rgba(0,0,0,.1))}" +
+      ".rs-row .rs-l{flex:1}.rs-row .rs-t{font-weight:600;font-size:13.5px}" +
+      ".rs-row .rs-d{color:var(--muted,#888);font-size:12px;line-height:1.45;margin-top:2px}" +
+      ".rs-seg{display:inline-flex;border:1px solid var(--border,rgba(0,0,0,.18));border-radius:9px;overflow:hidden;flex:none}" +
+      ".rs-seg button{border:0;background:transparent;color:var(--ink2,#555);font:inherit;font-size:12.5px;font-weight:600;" +
+      "padding:6px 13px;cursor:pointer}.rs-seg button.on{background:var(--accent,#2a78d6);color:#fff}" +
+      ".rs-seg button:disabled{opacity:.5;cursor:not-allowed}" +
+      ".rs-foot{display:flex;align-items:center;gap:10px;margin-top:18px}" +
+      ".rs-msg{font-size:12px;color:var(--muted,#888);margin-right:auto}.rs-msg.ok{color:#6bbf59}.rs-msg.err{color:#d03b3b}" +
+      ".rs-done{border:1px solid var(--accent,#2a78d6);background:var(--accent,#2a78d6);color:#fff;border-radius:9px;" +
+      "padding:7px 18px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}";
+    document.head.appendChild(s);
+  }
+
+  let _settingsOpen = false;
+  async function openSettings() {
+    if (_settingsOpen) return;
+    _settingsOpen = true;
+    ensureSettingsStyles();
+    const ov = document.createElement("div");
+    ov.className = "rs-ov";
+    const seg = (id, val) =>
+      `<span class="rs-seg" id="${id}">` +
+        `<button type="button" data-v="auto" class="${val === "auto" ? "on" : ""}">Auto</button>` +
+        `<button type="button" data-v="manual" class="${val === "manual" ? "on" : ""}">Manual</button></span>`;
+    const draw = (gl) => {
+      ov.innerHTML =
+        `<div class="rs-card" role="dialog" aria-modal="true">` +
+          `<h2>Project settings</h2>` +
+          `<p class="rs-sub">Planner → Analyst requirement-gap loop.</p>` +
+          `<div class="rs-row"><div class="rs-l"><div class="rs-t">Resolve gaps automatically</div>` +
+            `<div class="rs-d">After a plan, route genuine “requirement too thin to build” questions back to the Analyst resolver.</div></div>` +
+            seg("rs-trigger", gl.trigger) + `</div>` +
+          `<div class="rs-row"><div class="rs-l"><div class="rs-t">Apply resolutions automatically</div>` +
+            `<div class="rs-d">Apply the resolver’s refinements and re-plan only the affected requirements. Manual keeps them for review.</div></div>` +
+            seg("rs-apply", gl.apply) + `</div>` +
+          `<div class="rs-foot"><span class="rs-msg" id="rs-msg"></span>` +
+            `<button type="button" class="rs-done" id="rs-close">Done</button></div>` +
+        `</div>`;
+      wire(gl);
+    };
+    const setMsg = (t, cls) => { const m = ov.querySelector("#rs-msg"); if (m) { m.textContent = t || ""; m.className = "rs-msg" + (cls ? " " + cls : ""); } };
+    let CUR = { trigger: "auto", apply: "auto" };
+    async function save(next) {
+      setMsg("Saving…");
+      try {
+        const r = await fetch("/analyst/projects/" + encodeURIComponent(pid) + "/settings", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ gap_loop: next }) });
+        if (window.ReqoachAuth && window.ReqoachAuth.needAuth(r)) { setMsg("Sign-in required.", "err"); draw(CUR); return; }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const back = await r.json();
+        CUR = (back && back.gap_loop) || next;
+        draw(CUR);
+        setMsg("Saved ✓", "ok");
+        setTimeout(() => setMsg(""), 1600);
+      } catch (e) { setMsg("Save failed.", "err"); draw(CUR); }
+    }
+    function wire(gl) {
+      ov.querySelectorAll(".rs-seg button").forEach(b => b.addEventListener("click", () => {
+        const which = b.parentElement.id === "rs-trigger" ? "trigger" : "apply";
+        const v = b.dataset.v;
+        if (gl[which] === v) return;
+        save({ ...gl, [which]: v });
+      }));
+      const c = ov.querySelector("#rs-close");
+      if (c) c.addEventListener("click", close);
+    }
+    function close() { ov.remove(); document.removeEventListener("keydown", onKey); _settingsOpen = false; }
+    function onKey(e) { if (e.key === "Escape") close(); }
+    ov.addEventListener("click", e => { if (e.target === ov) close(); });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(ov);
+    ov.innerHTML = '<div class="rs-card"><h2>Project settings</h2><p class="rs-sub">Loading…</p></div>';
+    try {
+      const g = await fetch("/analyst/projects/" + encodeURIComponent(pid) + "/settings")
+        .then(r => r.ok ? r.json() : null);
+      CUR = (g && g.gap_loop) || CUR;
+    } catch (e) { /* fall through with defaults */ }
+    draw(CUR);
+  }
 
   // If the page has a connection LED (#status), relocate it into the nav so it sits
   // in the SAME position on every page — at the far right, after the Theme button.

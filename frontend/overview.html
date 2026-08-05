@@ -95,6 +95,7 @@
   .sec-head.collapsed .sec-caret{transform:rotate(-90deg)}
   .sec-body.hidden{display:none}
   #pipe-architect .node{max-width:340px}
+  #pipe-planner .node{max-width:340px}
   .conn svg{width:22px;height:22px}
   .conn.flow{color:var(--ok)}
 
@@ -200,6 +201,11 @@
     <div class="sec-body"><div class="pipe" id="pipe-architect"></div></div>
   </section>
 
+  <section class="phase-sec">
+    <button type="button" class="sec-head" aria-expanded="true"><span class="sec-caret">▾</span>Planner</button>
+    <div class="sec-body"><div class="pipe" id="pipe-planner"></div></div>
+  </section>
+
   <div id="log"></div>
 </main>
 
@@ -227,6 +233,7 @@ let HASDOCS = false;   // does the selected project have ≥1 Knowledge-Base doc
 let PROJECT = null;   // current project meta (carries owner)
 let MANAGE = true;    // may the signed-in user manage this project? (owner or admin)
 let ARCH = { running: false, stage: null, jobId: null };   // Architect row (separate service)
+let PLAN = { running: false, stage: null, jobId: null, prog: null };   // Planner row (its own service)
 
 function log(msg) { $('log').textContent = msg || ''; }
 
@@ -293,8 +300,19 @@ async function loadState() {
     ready: !!(STATE.release && (STATE.release.architectReady || STATE.release.done)),
     aspects: (arch && arch.aspects) ? arch.aspects.length : 0,
   };
+  // Planner row: ready once an architecture is committed; done once a plan is committed.
+  const plan = await fetch('repos/' + encodeURIComponent(pid) + '/plan').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+  const psum = (plan && plan.summary) || {};
+  STATE.planner = {
+    done: !!(plan && plan.exists),
+    ready: !!(STATE.architect && STATE.architect.done),
+    tasks: psum.feasible || 0,
+    questions: psum.questions || 0,
+    flagged: psum.flagged || 0,
+  };
   render();
   renderArchitect();
+  renderPlanner();
 
   // If a run is already in flight (e.g. the page was reloaded mid-run), reattach to it
   // so the live progress + Abort come back instead of the run looking idle.
@@ -417,6 +435,71 @@ function pollArchitect(jobId) {
       if (s.status === 'running') { ARCH.stage = s.stage || 'design'; renderArchitect(); }
       else if (s.status === 'done') { clearInterval(t); log('Architect complete — ' + ((s.result && s.result.aspects) || 0) + ' aspects.'); resolve(s); }
       else if (s.status === 'error') { clearInterval(t); log('✗ Architect failed: ' + (s.error || '')); alert('Architect failed:\n' + (s.error || '')); resolve(s); }
+    }, 2500);
+  });
+}
+
+// ---- Planner row (its own service at /planner/, polled separately) ----
+function planNodeHTML() {
+  const st = STATE.planner || {};
+  let cls, stateLine, action = '';
+  if (PLAN.running) {
+    cls = 'running';
+    const p = PLAN.prog || {};
+    const PSTAGE = { plan: 'Planning', resolve: 'Resolving requirement gaps',
+                     replan: 'Re-planning affected requirements', done: 'Finishing' };
+    const label = PSTAGE[PLAN.stage] || PLAN.stage || '';
+    const count = (p.total ? ` · ${p.done || 0}/${p.total} requirements` : '');
+    stateLine = `<span class="dot"></span>Running…${label ? ' · ' + esc(label) : ''}${count}`;
+  } else if (!st.ready) {
+    cls = 'locked';
+    stateLine = `<span class="dot"></span><span class="when">Locked · run the Architect first</span>`;
+  } else if (st.done) {
+    cls = 'done';
+    stateLine = `<span class="dot"></span>Done <span class="when">· ${st.tasks} task${st.tasks === 1 ? '' : 's'}`
+              + `${st.questions ? ', ' + st.questions + ' question' + (st.questions === 1 ? '' : 's') : ''}`
+              + `${st.flagged ? ', ' + st.flagged + ' flagged' : ''}</span>`;
+    action = `<button class="run" id="run-planner" ${busy || !MANAGE ? 'disabled' : ''}>Re-run</button>`
+           + `<a class="link" href="planning.html${Q}">Open planning →</a>`;
+  } else {
+    cls = 'ready';
+    stateLine = `<span class="dot"></span>Ready`;
+    action = `<button class="run" id="run-planner" ${busy || !MANAGE ? 'disabled' : ''}>Run Planner</button>`;
+  }
+  return `<div class="node ${cls}" id="node-planner">
+    <div class="top"><span class="idx">P</span><span class="name">Planning</span></div>
+    <div class="desc">Decompose each requirement into small, buildable tasks — deliverable, acceptance, dependencies, and traceability — for the Builder.</div>
+    <div class="state">${stateLine}</div>
+    <div class="act">${action}</div>
+  </div>`;
+}
+function renderPlanner() {
+  const box = $('pipe-planner'); if (!box) return;
+  box.innerHTML = planNodeHTML();
+  const rb = document.getElementById('run-planner');
+  if (rb) rb.addEventListener('click', runPlanner);
+}
+async function runPlanner() {
+  if (PLAN.running) return;
+  try {
+    const res = await fetch('/planner/projects/' + encodeURIComponent(pid) + '/planner:run', { method: 'POST' });
+    if (res.status === 401 || res.status === 403) { if (window.ReqoachAuth) window.ReqoachAuth.needAuth(res); return; }
+    const j = await res.json();
+    if (!j.job_id) throw new Error('could not start');
+    PLAN.running = true; PLAN.jobId = j.job_id; PLAN.stage = 'plan'; PLAN.prog = null; renderPlanner();
+    log('Running Planner…');
+    await pollPlanner(j.job_id);
+  } catch (e) { alert('Planner run failed:\n' + e.message); }
+  finally { PLAN.running = false; await loadState(); }
+}
+function pollPlanner(jobId) {
+  return new Promise(resolve => {
+    const t = setInterval(async () => {
+      let s; try { s = await fetch('/planner/jobs/' + jobId).then(r => r.ok ? r.json() : null); } catch (e) { s = null; }
+      if (!s) return;
+      if (s.status === 'running') { PLAN.stage = s.stage || 'plan'; PLAN.prog = s.progress || null; renderPlanner(); }
+      else if (s.status === 'done') { clearInterval(t); log('Planner complete — ' + ((s.result && s.result.tasks) || 0) + ' tasks.'); resolve(s); }
+      else if (s.status === 'error') { clearInterval(t); log('✗ Planner failed: ' + (s.error || '')); alert('Planner failed:\n' + (s.error || '')); resolve(s); }
     }, 2500);
   });
 }
@@ -876,6 +959,7 @@ if (pid) {
   $('pipe').innerHTML = '<div style="color:var(--muted);padding:16px 2px;font-size:13px">'
     + 'Select a project from the menu above to view and run its pipeline.</div>';
   $('pipe-architect').innerHTML = '';
+  $('pipe-planner').innerHTML = '';
 }
 
 // Knowledge Base lane — global, so it loads with OR without a project selected.
