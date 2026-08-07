@@ -73,22 +73,53 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('overvi
     border-radius:0 6px 6px 0;font-size:13px}
   .frow{border-left-color:var(--s1)}
   /* gap resolutions */
-  .grsummary{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 8px}
+  .grsummary{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px}
   .grpill{font-size:11.5px;font-weight:700;border-radius:20px;padding:2px 11px;background:var(--panel2);color:var(--ink2)}
-  .grrow{border-left:3px solid var(--muted);padding:7px 12px;margin:6px 0;background:var(--panel2);
-    border-radius:0 6px 6px 0;font-size:13px}
-  .grrow .grtop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .grdisp{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;border-radius:5px;padding:1px 7px;color:#fff}
   .grdisp.refine{background:var(--accent)} .grdisp.author{background:#7c5cd0}
   .grdisp.needs_input{background:var(--s3);color:#5a4300} .grdisp.dismiss{background:var(--muted)}
   .grdisp.wont_do{background:var(--s1)}
-  .grrow.refine{border-left-color:var(--accent)} .grrow.author{border-left-color:#7c5cd0}
-  .grrow.needs_input{border-left-color:var(--s3)} .grrow.dismiss{border-left-color:var(--muted)}
-  .grrow.wont_do{border-left-color:var(--s1)}
   .grrat{color:var(--ink2);margin-top:4px;font-size:12.5px}
   .grnew{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);margin-top:4px;
     background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 8px}
-  .grapplied{font-size:11px;color:var(--s4);font-weight:600}
+  /* grouped resolution surface */
+  .rgroup{margin:14px 0}
+  .rghead{display:flex;align-items:center;gap:9px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;
+    font-weight:700;color:var(--ink2);margin:0 0 8px}
+  .rghead .rgcount{background:var(--panel2);border-radius:20px;padding:1px 9px;font-size:11.5px}
+  .rghead .rgdot{width:9px;height:9px;border-radius:50%;flex:none}
+  .rgdot.needs{background:var(--s3)} .rgdot.auto{background:var(--s4)} .rgdot.changed{background:var(--accent)}
+  /* needs-your-answer card (grouped per requirement) */
+  .qcard{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:8px 0}
+  .qcard .qhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .qcard .qreqtext{font-size:12.5px;color:var(--ink2);margin:5px 0 2px}
+  .qcard ul.qlist{margin:6px 0 8px;padding-left:18px}
+  .qcard ul.qlist li{font-size:13px;margin:3px 0}
+  .qcard .flagtag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--s1);border:1px solid var(--s1);border-radius:4px;padding:0 5px;margin-left:6px}
+  .qcard .flaginline{color:var(--s1);font-weight:600}
+  textarea.ansbox,textarea.candtext{width:100%;box-sizing:border-box;background:var(--surface);color:var(--ink);
+    border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;resize:vertical}
+  textarea.ansbox{min-height:52px}
+  textarea.candtext{min-height:56px;font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .qactions{display:flex;align-items:center;gap:10px;margin-top:8px}
+  .prevmsg{font-size:12px;color:var(--muted)}.prevmsg.err{color:var(--s1)}.prevmsg.ok{color:var(--s4)}
+  .btn.ghost{background:transparent;color:var(--accent)}
+  /* candidate (refine / author) */
+  .cands{margin-top:10px;display:flex;flex-direction:column;gap:10px}
+  .cand{border:1px solid var(--border);border-radius:9px;padding:10px 12px;background:var(--panel2)}
+  .cand.refine{border-left:3px solid var(--accent)} .cand.author{border-left:3px solid #7c5cd0}
+  .cand .candhead{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:6px}
+  .cand .candlabel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .cand.refine .candlabel{color:var(--accent)} .cand.author .candlabel{color:#7c5cd0}
+  .score{font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums;border-radius:5px;padding:1px 8px;background:var(--surface);border:1px solid var(--border)}
+  .score.up{color:var(--s4)} .score.down{color:var(--s1)}
+  .cand label.usechk{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;cursor:pointer}
+  .addauthor{font-size:12px;color:#7c5cd0;font-weight:600;background:none;border:0;cursor:pointer;padding:2px 0;margin-top:2px}
+  .applyrow{display:flex;align-items:center;gap:10px;margin-top:10px}
+  .changed-line{font-size:13px;color:var(--ink2);margin:6px 0;border-left:3px solid var(--accent);
+    padding:6px 12px;background:var(--panel2);border-radius:0 6px 6px 0}
+  .changed-line b{color:var(--ink)}
 </style>
 
 <header>
@@ -107,15 +138,25 @@ if(!new URLSearchParams(location.search).get('project'))location.replace('overvi
   <div class="filters" id="filters"></div>
   <div id="tasks"></div>
 
-  <h3 class="sec">Open questions (<span id="qCount">0</span>)</h3>
-  <div id="questions"><div class="none">—</div></div>
-
-  <h3 class="sec">Flagged (<span id="fCount">0</span>)</h3>
-  <div id="flagged"><div class="none">—</div></div>
-
-  <h3 class="sec">Requirement gap resolutions (<span id="grCount">0</span>)</h3>
+  <h3 class="sec">Open items to resolve (<span id="grCount">0</span>)</h3>
   <div class="grsummary" id="grSummary"></div>
-  <div id="gapres"><div class="none">The Planner→Analyst loop routes genuine “too thin to build” questions back to the Analyst. Run the Planner with the loop enabled (⚙ Project settings) to populate this.</div></div>
+
+  <div class="rgroup" id="rg-changed" style="display:none">
+    <div class="rghead"><span class="rgdot changed"></span>Applied this session <span class="rgcount" id="cnt-changed">0</span></div>
+    <div id="body-changed"></div>
+  </div>
+
+  <div class="rgroup" id="rg-needs" style="display:none">
+    <div class="rghead"><span class="rgdot needs"></span>Needs your answer <span class="rgcount" id="cnt-needs">0</span></div>
+    <div id="body-needs"></div>
+  </div>
+
+  <div class="rgroup" id="rg-auto" style="display:none">
+    <div class="rghead"><span class="rgdot auto"></span>Auto-resolved by the Analyst <span class="rgcount" id="cnt-auto">0</span></div>
+    <div id="body-auto"></div>
+  </div>
+
+  <div id="gapres"><div class="none">The Planner→Analyst loop routes “too thin to build” questions and non-converging tasks back to the Analyst. Run the Planner with the loop enabled (⚙ Project settings) to populate this.</div></div>
 </main>
 
 <script src="js/nav.js"></script>
@@ -127,7 +168,9 @@ if (!pid) location.href = 'overview.html';
 
 const PLANNER = '/planner';   // edge route to the Planner service
 let PLAN = null;              // the loaded plan view
+let RUN = null;               // the Analyst run_id the plan was built from (for answer:preview/apply)
 let kindFilter = 'all';
+const SESSION_CHANGED = [];   // items resolved this session (for "Applied this session")
 
 function setStatus(text, cls) { const s = $('pstatus'); s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); }
 
@@ -184,20 +227,14 @@ function renderFilters() {
     c.addEventListener('click', () => { kindFilter = c.dataset.k; renderFilters(); renderTasks(); }));
 }
 
-function renderList(box, items, cls, fmt) {
-  box.innerHTML = items.length ? items.map(fmt).join('') : '<div class="none">None.</div>';
-}
-
 function renderPlan(v) {
   PLAN = v;
+  RUN = (v.source || {}).run_id || RUN;
   renderSummary(v);
   renderFilters();
   renderTasks();
-  const qs = v.questions || [], fl = v.flagged || [];
-  $('qCount').textContent = qs.length;
-  $('fCount').textContent = fl.length;
-  renderList($('questions'), qs, 'qrow', q => `<div class="qrow">${esc(q.question || q.title || q.detail || (typeof q === 'string' ? q : JSON.stringify(q)))}${q.traces_to ? ' <span class="by">' + esc((q.traces_to || []).join(', ')) + '</span>' : ''}</div>`);
-  renderList($('flagged'), fl, 'frow', f => `<div class="frow">${esc(f.title || f.reason || f.detail || (typeof f === 'string' ? f : JSON.stringify(f)))}${f.traces_to ? ' <span class="by">' + esc((f.traces_to || []).join(', ')) + '</span>' : ''}</div>`);
+  // Open questions + flagged tasks are no longer shown as separate read-only lists — they ARE
+  // the "Needs your answer" surface (loadGapResolutions sources them straight from the plan).
 }
 
 async function loadPlan() {
@@ -209,36 +246,176 @@ async function loadPlan() {
   loadGapResolutions();
 }
 
-// The Planner->Analyst gap-resolution outcomes (dispositions the resolver decided for the
-// plan's genuine questions). Persisted by the Analyst; read-only here.
+// The Planner->Analyst gap resolutions, grouped into three clearly-labelled buckets:
+//   Needs your answer  — needs_input + flagged: interactive (answer -> refiner -> you pick text)
+//   Auto-resolved      — refine/author/wont_do/dismiss the resolver applied on its own (read-only)
+//   Applied this session — what you just resolved here (with a Re-plan action)
 const DISP_LABEL = { refine: 'refined', author: 'authored', needs_input: 'needs input',
                      dismiss: 'dismissed', wont_do: "won't do" };
+const fmtScore = s => s == null ? '—' : (Math.round(s * 100) / 100).toFixed(2);
+
 async function loadGapResolutions() {
   let g;
   try { g = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/planner-gaps').then(r => r.ok ? r.json() : null); }
   catch (e) { g = null; }
   const records = (g && g.records) || [];
-  $('grCount').textContent = records.length;
-  const counts = (g && g.counts) || {};
-  $('grSummary').innerHTML = Object.keys(counts).length
-    ? Object.entries(counts).map(([k, n]) => `<span class="grpill">${esc(DISP_LABEL[k] || k)}: ${n}</span>`).join('')
-    : '';
-  if (!records.length) return;   // keep the placeholder prompt
-  $('gapres').innerHTML = records.map(r => {
+  // "Needs your answer" = the CURRENT plan's own open items (authoritative), grouped per
+  // requirement: unresolved questions + flagged "didn't converge" tasks. The planner-gaps
+  // records are only the resolver's LOG — used for the read-only "Auto-resolved" group.
+  const byReq = collectOpenItems();
+  const totalOpen = ((PLAN && PLAN.questions) || []).length + ((PLAN && PLAN.flagged) || []).length;
+  const auto = records.filter(r => ['refine', 'author', 'wont_do', 'dismiss'].includes(r.disposition || ''));
+  const autoCounts = {};
+  auto.forEach(r => { autoCounts[r.disposition] = (autoCounts[r.disposition] || 0) + 1; });
+
+  $('grCount').textContent = totalOpen;
+  $('grSummary').innerHTML = [
+    totalOpen ? `<span class="grpill">${totalOpen} to answer</span>` : '',
+    ...Object.entries(autoCounts).map(([k, n]) => `<span class="grpill">${esc(DISP_LABEL[k] || k)}: ${n}</span>`)
+  ].filter(Boolean).join('');
+
+  renderNeeds(byReq);
+  renderAuto(auto);
+  renderChanged();
+  $('gapres').style.display = (totalOpen || auto.length || SESSION_CHANGED.length) ? 'none' : '';
+}
+
+// The plan's open items, grouped per requirement. A requirement can carry both plain questions
+// and flagged (didn't-converge) tasks; both are answerable the same way.
+function collectOpenItems() {
+  const byReq = {};
+  const bucket = rid => (byReq[rid] = byReq[rid] || { questions: [], flagged: [] });
+  ((PLAN && PLAN.questions) || []).forEach(q => {
+    const rid = (q.traces_to || [])[0] || '—';
+    bucket(rid).questions.push(q.question || q.gap || q.task_title || '');
+  });
+  ((PLAN && PLAN.flagged) || []).forEach(f => {
+    const rid = (f.traces_to || [])[0] || '—';
+    bucket(rid).flagged.push({ title: f.task_title || '', why: f.missing || f.detail || '' });
+  });
+  return byReq;
+}
+
+function renderNeeds(byReq) {
+  const reqIds = Object.keys(byReq);
+  const total = reqIds.reduce((n, rid) => n + byReq[rid].questions.length + byReq[rid].flagged.length, 0);
+  $('cnt-needs').textContent = total;
+  $('rg-needs').style.display = reqIds.length ? '' : 'none';
+  $('body-needs').innerHTML = reqIds.map(rid => {
+    const gr = byReq[rid], isFlagged = gr.flagged.length > 0;
+    const items = gr.questions.map(q => `<li>${esc(q)}</li>`).join('')
+      + gr.flagged.map(f => `<li><span class="flaginline">couldn’t build “${esc(f.title)}”:</span> ${esc(f.why || 'clarify or complete the requirement')}</li>`).join('');
+    return `<div class="qcard" data-req="${esc(rid)}">
+      <div class="qhead"><span class="tid">${esc(rid)}</span>${isFlagged ? '<span class="flagtag">didn’t converge</span>' : ''}</div>
+      <ul class="qlist">${items}</ul>
+      <textarea class="ansbox" placeholder="Answer the open item(s) for ${esc(rid)} — plain language is fine. Often the fix is authoring a missing schema."></textarea>
+      <div class="qactions"><button class="btn prevbtn">Preview resolution</button><span class="prevmsg"></span></div>
+      <div class="cands" style="display:none"></div>
+    </div>`;
+  }).join('');
+  $('body-needs').querySelectorAll('.qcard').forEach(card =>
+    card.querySelector('.prevbtn').addEventListener('click', () => doPreview(card)));
+}
+
+function renderAuto(auto) {
+  $('cnt-auto').textContent = auto.length;
+  $('rg-auto').style.display = auto.length ? '' : 'none';
+  $('body-auto').innerHTML = auto.map(r => {
     const d = (r.disposition || '').toLowerCase();
-    const applied = r.applied ? ' <span class="grapplied">· applied</span>' : '';
-    const q = r.source_question || r.gap || '';
-    const newText = d === 'refine' ? r.refined_text
-                  : d === 'author' ? r.authored_requirement
-                  : d === 'needs_input' ? r.question : '';
-    return `<div class="grrow ${esc(d)}">
-      <div class="grtop"><span class="grdisp ${esc(d)}">${esc(DISP_LABEL[d] || d)}</span>
-        <span class="tid">${esc(r.req_id || '')}</span>${applied}</div>
-      ${q ? `<div class="grrat">${esc(q)}</div>` : ''}
+    const newText = d === 'refine' ? r.refined_text : d === 'author' ? r.authored_requirement : '';
+    return `<div class="qcard" style="padding:9px 12px">
+      <div class="qhead"><span class="grdisp ${esc(d)}">${esc(DISP_LABEL[d] || d)}</span><span class="tid">${esc(r.req_id || '')}</span></div>
+      ${r.source_question ? `<div class="qreqtext">${esc(r.source_question)}</div>` : ''}
       ${r.rationale ? `<div class="grrat">${esc(r.rationale)}</div>` : ''}
       ${newText ? `<div class="grnew">${esc(newText)}</div>` : ''}
     </div>`;
   }).join('');
+}
+
+function renderChanged() {
+  $('rg-changed').style.display = SESSION_CHANGED.length ? '' : 'none';
+  if (!SESSION_CHANGED.length) return;
+  $('cnt-changed').textContent = SESSION_CHANGED.length;
+  $('body-changed').innerHTML = SESSION_CHANGED.map(c =>
+    `<div class="changed-line">Answered <b>${esc(c.rid)}</b> → ${(c.affected || []).map(a => `<b>${esc(a)}</b>`).join(', ') || '(no change)'}`
+    + `${(c.authored || []).length ? ` <span class="grpill">authored ${c.authored.length}</span>` : ''}</div>`).join('')
+    + `<div class="qactions"><button class="btn" id="replanBtn">Re-plan now</button><span class="prevmsg">Rebuilds only the affected requirements.</span></div>`;
+  const rb = document.getElementById('replanBtn');
+  if (rb) rb.addEventListener('click', () => $('run').click());
+}
+
+async function doPreview(card) {
+  const rid = card.dataset.req;
+  const answer = card.querySelector('.ansbox').value.trim();
+  const msg = card.querySelector('.prevmsg');
+  if (!answer) { msg.textContent = 'Type an answer first.'; msg.className = 'prevmsg err'; return; }
+  if (!RUN) { msg.textContent = 'No run id — load a plan first.'; msg.className = 'prevmsg err'; return; }
+  const question = [...card.querySelectorAll('.qlist li')].map(li => li.textContent).join(' | ');
+  const btn = card.querySelector('.prevbtn'); btn.disabled = true;
+  msg.textContent = 'Refining & scoring…'; msg.className = 'prevmsg';
+  try {
+    const res = await fetch(`/analyst/projects/${encodeURIComponent(pid)}/reviews/${encodeURIComponent(RUN)}/requirements/${encodeURIComponent(rid)}/answer:preview`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, answer }) });
+    if (window.ReqoachAuth && window.ReqoachAuth.needAuth(res)) { msg.textContent = 'Sign-in required.'; msg.className = 'prevmsg err'; return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    renderCands(card, await res.json());
+    msg.textContent = '';
+  } catch (e) { msg.textContent = 'Preview failed: ' + e.message; msg.className = 'prevmsg err'; }
+  finally { btn.disabled = false; }
+}
+
+function renderCands(card, p) {
+  const rid = card.dataset.req, rf = p.refine || {}, au = p.author || {};
+  const before = rf.score_before, after = rf.score_after;
+  const dir = (after != null && before != null) ? (after >= before ? 'up' : 'down') : '';
+  const box = card.querySelector('.cands'); box.style.display = '';
+  box.innerHTML =
+    `<div class="cand refine">
+      <div class="candhead"><span class="candlabel">Refine ${esc(rid)}</span>
+        <span class="score">before ${fmtScore(before)}</span><span class="score ${dir}">after ${fmtScore(after)}</span>
+        <label class="usechk"><input type="checkbox" class="use-refine">apply</label></div>
+      <textarea class="candtext refine-text">${esc(rf.candidate_text || '')}</textarea></div>
+    <div class="cand author">
+      <div class="candhead"><span class="candlabel">Author new requirement(s)</span>
+        <span class="score">${fmtScore(au.score)}</span>
+        <label class="usechk"><input type="checkbox" class="use-author" checked>apply</label></div>
+      <textarea class="candtext author-text">${esc(au.candidate_text || '')}</textarea>
+      <button class="addauthor">+ add another requirement</button></div>
+    <div class="applyrow"><button class="btn applybtn">Apply selected</button><span class="prevmsg applymsg"></span></div>`;
+  box.querySelector('.addauthor').addEventListener('click', () => {
+    const t = document.createElement('textarea'); t.className = 'candtext author-text'; t.style.marginTop = '6px';
+    box.querySelector('.cand.author').insertBefore(t, box.querySelector('.addauthor'));
+  });
+  box.querySelector('.applybtn').addEventListener('click', () => doApply(card));
+}
+
+async function doApply(card) {
+  const rid = card.dataset.req, box = card.querySelector('.cands'), msg = box.querySelector('.applymsg');
+  const useRefine = box.querySelector('.use-refine').checked;
+  const refineText = box.querySelector('.refine-text').value.trim();
+  const authorTexts = box.querySelector('.use-author').checked
+    ? [...box.querySelectorAll('.author-text')].map(t => t.value.trim()).filter(Boolean) : [];
+  if (!(useRefine && refineText) && !authorTexts.length) { msg.textContent = 'Select refine and/or author first.'; msg.className = 'prevmsg err'; return; }
+  // Send the real question + the human's answer so the origin requirement records the resolution
+  // (the Planner injects it as authoritative context, so an answered question is not re-asked).
+  const question = [...card.querySelectorAll('.qlist li')].map(li => li.textContent).join(' | ');
+  const answer = (card.querySelector('.ansbox') || {}).value || '';
+  const btn = box.querySelector('.applybtn'); btn.disabled = true; msg.textContent = 'Applying…'; msg.className = 'prevmsg';
+  try {
+    const res = await fetch(`/analyst/projects/${encodeURIComponent(pid)}/reviews/${encodeURIComponent(RUN)}/requirements/${encodeURIComponent(rid)}/answer:apply`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer, refine_text: useRefine ? refineText : '', author_texts: authorTexts }) });
+    if (window.ReqoachAuth && window.ReqoachAuth.needAuth(res)) { msg.textContent = 'Sign-in required.'; msg.className = 'prevmsg err'; btn.disabled = false; return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const out = await res.json();
+    SESSION_CHANGED.push({ rid, affected: out.affected_req_ids || [], authored: out.authored_req_ids || [] });
+    card.remove();
+    const remaining = $('body-needs').querySelectorAll('.qcard').length;
+    $('cnt-needs').textContent = remaining;
+    if (!remaining) $('rg-needs').style.display = 'none';
+    renderChanged();
+    setStatus('Applied — re-plan to rebuild the affected requirements.', 'ok');
+  } catch (e) { msg.textContent = 'Apply failed: ' + e.message; msg.className = 'prevmsg err'; btn.disabled = false; }
 }
 
 // --- trigger + poll the Planner job ---
