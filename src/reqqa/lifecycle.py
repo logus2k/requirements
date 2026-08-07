@@ -139,7 +139,9 @@ def architecture_view(pid: str) -> dict:
             })
 
     return {"exists": bool(aspects or diagrams), "contract_version": contract,
-            "open_issues": open_issues, "system_overview": system_overview, "aspects": aspects}
+            "open_issues": open_issues, "system_overview": system_overview, "aspects": aspects,
+            # Advisory design-plausibility self-assessment (out-of-domain / drift per aspect).
+            "design_review": (h.get("design_review") if os.path.isfile(hp) else {}) or {}}
 
 
 @router.get("/repos/{pid}/plan")
@@ -167,6 +169,8 @@ def plan_view(pid: str) -> dict:
         "flagged": plan.get("flagged", []),
         "coverage_gaps": plan.get("coverage_gaps", []),
         "graph": plan.get("graph", {}),
+        # Advisory plan-plausibility self-assessment (per requirement: drift / incomplete).
+        "plan_review": plan.get("plan_review", {}),
     }
 
 

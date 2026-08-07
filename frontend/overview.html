@@ -217,10 +217,13 @@ const pid = new URLSearchParams(location.search).get('project');
 const Q = '?project=' + encodeURIComponent(pid);
 const when = iso => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
 
-// The four pipeline stages, in the enforced order.
+// The pipeline stages, in the enforced order. Structure (vocabulary + feature-branch tree)
+// is a HARD dependency for the Architect — it designs per branch — so it runs before
+// Classification/Coverage and gates everything downstream.
 const STAGES = [
   { key: 'framing',   name: 'Problem Framing',  desc: 'Distil a structured problem statement from the documents.' },
   { key: 'quality',   name: 'Quality',          desc: 'INCOSE per-requirement scoring (C1–C9) + set-level checks.' },
+  { key: 'structure', name: 'Structure',        desc: 'Vocabulary (glossary + tags) + requirement tree (feature branches) — the Architect designs one aspect per branch.' },
   { key: 'classify',  name: 'Classification',   desc: 'Label each requirement — routing classes, type, constraints (the Architect contract).' },
   { key: 'coverage',  name: 'Coverage',         desc: '16-domain judge panel — are the requirements enough?' },
   { key: 'release',   name: 'Release',          desc: 'Human sign-off — approve the set for the Architect, then download the package.' },
@@ -245,6 +248,8 @@ const STAGE_LABEL = {
   review: 'Reviewing flagged requirements', set_level: 'Set-level analysis',
   rescore: 'Re-assessing revised requirements', setlevel: 'Set-level analysis (duplicates / consistency)',
   classify: 'Classifying requirements',
+  structure: 'Building vocabulary + feature tree', vocabulary: 'Extracting vocabulary',
+  branches: 'Proposing feature branches', assign: 'Assigning requirements to branches',
   requirements: 'Gathering requirements', judges: 'Domain-expert judges', synthesis: 'Synthesising findings',
 };
 function fmtDur(s) {
@@ -267,17 +272,26 @@ async function loadState() {
   const docs = proj.documents || [], qr = proj.quality_runs || [], cr = proj.coverage_runs || [];
   HASDOCS = docs.length > 0;   // gates Problem Framing (documents are managed in the KB lane now)
   const lastWhen = arr => arr.length ? (arr.map(r => r.finished_at || '').sort().slice(-1)[0]) : '';
-  // Classification status lives in the review session, not project meta — fetch it (cheap)
-  // only when there is a quality run to classify.
-  const cls = qr.length
-    ? await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/classification').then(r => r.ok ? r.json() : {}).catch(() => ({}))
-    : {};
+  // Per-stage headline metrics — reported on each block as the stage's results land.
+  // Classification + structure status live outside project meta, so fetch them (cheap) only
+  // when there is a quality run to describe.
+  const sortByFinished = arr => arr.slice().sort((a, b) => (a.finished_at || '').localeCompare(b.finished_at || ''));
+  const qLatest = qr.length ? sortByFinished(qr).slice(-1)[0] : null;
+  const cLatest = cr.length ? sortByFinished(cr).slice(-1)[0] : null;
+  const [cls, structure] = qr.length ? await Promise.all([
+    fetch('/analyst/projects/' + encodeURIComponent(pid) + '/classification').then(r => r.ok ? r.json() : {}).catch(() => ({})),
+    fetch('/analyst/projects/' + encodeURIComponent(pid) + '/structure').then(r => r.ok ? r.json() : {}).catch(() => ({})),
+  ]) : [{}, {}];
   STATE = {
     framing:   { done: !!(ps && ps.version >= 1 && ps.statement), ratified: !!(ps && ps.ratified), when: ps && ps.updated_at },
     quality:   { done: qr.length > 0, when: lastWhen(qr), count: qr.length,
-                 runId: qr.length ? qr.slice().sort((a, b) => (a.finished_at || '').localeCompare(b.finished_at || '')).slice(-1)[0].run_id : null },
+                 info: qLatest && qLatest.total ? qLatest.total + ' requirements' : '',
+                 runId: qLatest ? qLatest.run_id : null },
+    structure: { done: !!structure.done,
+                 info: structure.done ? structure.branches + ' branches · ' + structure.glossary + ' terms' : '' },
     classify:  { done: !!cls.done, info: cls.total ? cls.classified + '/' + cls.total + ' classified' : '' },
-    coverage:  { done: cr.length > 0, when: lastWhen(cr), count: cr.length },
+    coverage:  { done: cr.length > 0, when: lastWhen(cr), count: cr.length,
+                 info: cLatest && cLatest.gap_count != null ? cLatest.gap_count + ' coverage gaps' : '' },
     release:   { done: false },   // filled from /release below (needs a quality run)
   };
   // Release readiness — the gate verdict. Fetch when there is a run to release.
@@ -295,20 +309,39 @@ async function loadState() {
   }
   // Architect row: ready once the set is Architect-ready; done once an architecture is committed.
   const arch = await fetch('repos/' + encodeURIComponent(pid) + '/architecture').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+  // Release-gate state (Architect→Planner, Planner→Development): mode auto/manual + approval.
+  const gsettings = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/settings').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+  STATE.gates = (gsettings && gsettings.gates) || { architect: { mode: 'auto', effective: true }, planner: { mode: 'auto', effective: true } };
+  const dr = (arch && arch.design_review) || {};
   STATE.architect = {
     done: !!(arch && arch.exists),
     ready: !!(STATE.release && (STATE.release.architectReady || STATE.release.done)),
     aspects: (arch && arch.aspects) ? arch.aspects.length : 0,
+    components: (arch && arch.aspects) ? arch.aspects.reduce((n, a) => n + ((a.components || []).length), 0) : 0,
+    openIssues: (arch && arch.open_issues) ? arch.open_issues.length : 0,
+    // Design-plausibility judge: how many aspects it flagged as incoherent (out-of-domain / drift).
+    review: { incoherent: (dr.incoherent || []).length,
+              ran: !!(dr.results && Object.keys(dr.results).length), error: dr.error || null },
   };
   // Planner row: ready once an architecture is committed; done once a plan is committed.
   const plan = await fetch('repos/' + encodeURIComponent(pid) + '/plan').then(r => r.ok ? r.json() : {}).catch(() => ({}));
   const psum = (plan && plan.summary) || {};
+  const prv = (plan && plan.plan_review) || {};
+  // Gap-resolution dispositions (assume / refine / needs_input …) — surfaced as its own block.
+  const gaps = (plan && plan.exists)
+    ? await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/planner-gaps').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+    : {};
   STATE.planner = {
     done: !!(plan && plan.exists),
-    ready: !!(STATE.architect && STATE.architect.done),
+    // Ready once the design is committed AND the Architect release gate is satisfied
+    // (auto, or manually approved). A manual, unapproved gate blocks planning.
+    ready: !!(STATE.architect && STATE.architect.done && ((STATE.gates.architect || {}).effective !== false)),
     tasks: psum.feasible || 0,
     questions: psum.questions || 0,
     flagged: psum.flagged || 0,
+    gaps: { counts: gaps.counts || {}, total: gaps.total || 0 },
+    review: { drift: (prv.implausible || []).length, incomplete: (prv.incomplete || []).length,
+              ran: !!(prv.results && Object.keys(prv.results).length) },
   };
   render();
   renderArchitect();
@@ -325,7 +358,7 @@ async function loadState() {
 
 function pipelineSummary() {
   const done = STAGES.filter(s => STATE[s.key] && STATE[s.key].done).length;
-  return done === STAGES.length ? 'Pipeline complete — all four stages have run.'
+  return done === STAGES.length ? 'Pipeline complete — all stages have run.'
        : done === 0 ? 'Pipeline not started.'
        : done + ' of ' + STAGES.length + ' stages complete.';
 }
@@ -388,29 +421,83 @@ function archNodeHTML() {
   if (ARCH.running) {
     cls = 'running';
     stateLine = `<span class="dot"></span>Running…${ARCH.stage ? ' · ' + esc(ARCH.stage) : ''}`;
+  } else if (st.done) {
+    // A committed architecture is shown as Done regardless of the release gate — it exists and
+    // ran; approval is a separate concern surfaced by the Release block.
+    cls = 'done';
+    stateLine = `<span class="dot"></span>Done <span class="when">· ${st.aspects} aspect${st.aspects === 1 ? '' : 's'}, ${st.components} component${st.components === 1 ? '' : 's'}${st.openIssues ? ' · ' + st.openIssues + ' open issue' + (st.openIssues === 1 ? '' : 's') : ''}</span>`;
+    action = `<button class="run" id="run-architect" ${busy || !MANAGE ? 'disabled' : ''}>Re-run</button>`
+           + `<a class="link" href="architecture.html${Q}">Open architecture →</a>`;
   } else if (!st.ready) {
     cls = 'locked';
     stateLine = `<span class="dot"></span><span class="when">Locked · approve the set for the Architect first</span>`;
-  } else if (st.done) {
-    cls = 'done';
-    stateLine = `<span class="dot"></span>Done <span class="when">· ${st.aspects} aspect${st.aspects === 1 ? '' : 's'}</span>`;
-    action = `<button class="run" id="run-architect" ${busy || !MANAGE ? 'disabled' : ''}>Re-run</button>`
-           + `<a class="link" href="architecture.html${Q}">Open architecture →</a>`;
   } else {
     cls = 'ready';
     stateLine = `<span class="dot"></span>Ready`;
     action = `<button class="run" id="run-architect" ${busy || !MANAGE ? 'disabled' : ''}>Run Architect</button>`;
   }
   return `<div class="node ${cls}" id="node-architect">
-    <div class="top"><span class="idx">A</span><span class="name">Architecture</span></div>
+    <div class="top"><span class="idx">A</span><span class="name">Design</span></div>
     <div class="desc">Per-aspect design — components, interfaces (with operation signatures), functions, dependencies, and diagrams.</div>
     <div class="state">${stateLine}</div>
     <div class="act">${action}</div>
   </div>`;
 }
+// A read-only reporting block (no Run button) — a facet of a single service run, e.g. a judge
+// verdict or a resolution summary. Same visual language as the runnable stage nodes.
+function reportNodeHTML(idx, name, desc, cls, stateLine) {
+  return `<div class="node ${cls}">
+    <div class="top"><span class="idx">${idx}</span><span class="name">${esc(name)}</span></div>
+    <div class="desc">${esc(desc)}</div>
+    <div class="state">${stateLine}</div>
+  </div>`;
+}
+const CONN = done => `<div class="conn ${done ? 'flow' : ''}">${ARROW}</div>`;
+// A release-gate block: auto (passes on completion) or manual (needs human sign-off before the
+// downstream agent proceeds). Mode is toggled in Project settings; approval happens here.
+function gateBlockHTML(idx, gate, nextName, stageDone) {
+  const g = (STATE.gates && STATE.gates[gate]) || { mode: 'auto', effective: true };
+  const desc = `Sign off and hand the ${gate === 'architect' ? 'design to the Planner' : 'plan to Development'}. Mode (auto / manual) is set in Project settings.`;
+  let cls, line, action = '';
+  const dis = !MANAGE ? 'disabled' : '';
+  if (!stageDone) { cls = 'locked'; line = `<span class="dot"></span><span class="when">Runs after ${gate === 'architect' ? 'the design' : 'the plan'}</span>`; }
+  else if (g.mode === 'auto') { cls = 'done'; line = `<span class="dot"></span>Auto-approved <span class="when">· ${nextName} may proceed</span>`; }
+  else if (g.approved) { cls = 'done'; line = `<span class="dot"></span>Approved${g.approved_by ? ` <span class="when">· by ${esc(g.approved_by)}</span>` : ''}`;
+    action = `<button class="run" data-gate="${gate}" data-act="revoke" ${dis}>Revoke</button>`; }
+  else { cls = 'ready'; line = `<span class="dot"></span><span class="when">⚠ Pending approval · ${nextName} blocked</span>`;
+    action = `<button class="run" data-gate="${gate}" data-act="approve" ${dis}>Approve for ${nextName}</button>`; }
+  return `<div class="node ${cls}">
+    <div class="top"><span class="idx">${idx}</span><span class="name">Release</span></div>
+    <div class="desc">${esc(desc)}</div>
+    <div class="state">${line}</div>
+    ${action ? `<div class="act">${action}</div>` : ''}
+  </div>`;
+}
+function wireGateButtons(box) {
+  box.querySelectorAll('button[data-gate]').forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      const r = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/gates/' + b.dataset.gate + '/' + b.dataset.act, { method: 'POST' });
+      if (r.status === 401 || r.status === 403) { if (window.ReqoachAuth) window.ReqoachAuth.needAuth(r); return; }
+    } catch (e) {}
+    await loadState();
+  }));
+}
 function renderArchitect() {
   const box = $('pipe-architect'); if (!box) return;
-  box.innerHTML = archNodeHTML();
+  const st = STATE.architect || {}, rv = st.review || {};
+  let rc, rl;   // Design Review block: the design-plausibility judge verdict
+  if (!st.done) { rc = 'locked'; rl = `<span class="dot"></span><span class="when">Runs with the Architect</span>`; }
+  else if (rv.error) { rc = 'ready'; rl = `<span class="dot"></span><span class="when">Review unavailable</span>`; }
+  else if (rv.incoherent > 0) { rc = 'ready'; rl = `<span class="dot"></span><span class="when">⚠ ${rv.incoherent} aspect${rv.incoherent === 1 ? '' : 's'} flagged</span>`; }
+  else { rc = 'done'; rl = `<span class="dot"></span>Coherent <span class="when">· ${st.aspects}/${st.aspects} aspects</span>`; }
+  box.innerHTML = archNodeHTML()
+    + CONN(st.done)
+    + reportNodeHTML('R', 'Design Review',
+        'Advisory plausibility judge — flags out-of-domain or invented design elements per aspect.', rc, rl)
+    + CONN(st.done)
+    + gateBlockHTML('✓', 'architect', 'Planner', st.done);
+  wireGateButtons(box);
   const rb = document.getElementById('run-architect');
   if (rb) rb.addEventListener('click', runArchitect);
 }
@@ -451,9 +538,6 @@ function planNodeHTML() {
     const label = PSTAGE[PLAN.stage] || PLAN.stage || '';
     const count = (p.total ? ` · ${p.done || 0}/${p.total} requirements` : '');
     stateLine = `<span class="dot"></span>Running…${label ? ' · ' + esc(label) : ''}${count}`;
-  } else if (!st.ready) {
-    cls = 'locked';
-    stateLine = `<span class="dot"></span><span class="when">Locked · run the Architect first</span>`;
   } else if (st.done) {
     cls = 'done';
     stateLine = `<span class="dot"></span>Done <span class="when">· ${st.tasks} task${st.tasks === 1 ? '' : 's'}`
@@ -461,6 +545,11 @@ function planNodeHTML() {
               + `${st.flagged ? ', ' + st.flagged + ' flagged' : ''}</span>`;
     action = `<button class="run" id="run-planner" ${busy || !MANAGE ? 'disabled' : ''}>Re-run</button>`
            + `<a class="link" href="planning.html${Q}">Open planning →</a>`;
+  } else if (!st.ready) {
+    cls = 'locked';
+    // Blocked either because the design hasn't run, or the Architect release gate is manual + unapproved.
+    const why = (STATE.architect && STATE.architect.done) ? 'approve the design (Architect release) first' : 'run the Architect first';
+    stateLine = `<span class="dot"></span><span class="when">Locked · ${why}</span>`;
   } else {
     cls = 'ready';
     stateLine = `<span class="dot"></span>Ready`;
@@ -475,7 +564,37 @@ function planNodeHTML() {
 }
 function renderPlanner() {
   const box = $('pipe-planner'); if (!box) return;
-  box.innerHTML = planNodeHTML();
+  const st = STATE.planner || {}, g = st.gaps || {}, rv = st.review || {};
+  // Gap Resolution block: how the Planner-surfaced gaps were dispositioned.
+  let gc, gl;
+  if (!st.done) { gc = 'locked'; gl = `<span class="dot"></span><span class="when">Runs with the Planner</span>`; }
+  else if (!g.total) { gc = 'done'; gl = `<span class="dot"></span>Done <span class="when">· no gaps</span>`; }
+  else {
+    const c = g.counts || {}, parts = [];
+    if (c.assume) parts.push(c.assume + ' assumed');
+    if (c.refine) parts.push(c.refine + ' refined');
+    if (c.author) parts.push(c.author + ' authored');
+    if (c.needs_input) parts.push(c.needs_input + ' need input');
+    if (c.wont_do) parts.push(c.wont_do + ' won’t do');
+    if (c.dismiss) parts.push(c.dismiss + ' dismissed');
+    gc = c.needs_input ? 'ready' : 'done';
+    gl = `<span class="dot"></span>Done <span class="when">· ${parts.join(' · ') || (g.total + ' resolved')}</span>`;
+  }
+  // Plan Review block: the plan-plausibility judge verdict.
+  let vc, vl;
+  if (!st.done) { vc = 'locked'; vl = `<span class="dot"></span><span class="when">Runs with the Planner</span>`; }
+  else if (rv.drift || rv.incomplete) { vc = 'ready'; vl = `<span class="dot"></span><span class="when">${rv.drift} drift · ${rv.incomplete} incomplete</span>`; }
+  else { vc = 'done'; vl = `<span class="dot"></span>Clean <span class="when">· no drift, no gaps</span>`; }
+  box.innerHTML = planNodeHTML()
+    + CONN(st.done)
+    + reportNodeHTML('G', 'Gap Resolution',
+        'How Planner-surfaced gaps were resolved — assumed (recorded default), refined, authored, or escalated for input.', gc, gl)
+    + CONN(st.done)
+    + reportNodeHTML('V', 'Plan Review',
+        'Advisory plan-plausibility judge — per requirement, do its tasks realize it without drift or omission?', vc, vl)
+    + CONN(st.done)
+    + gateBlockHTML('✓', 'planner', 'Development', st.done);
+  wireGateButtons(box);
   const rb = document.getElementById('run-planner');
   if (rb) rb.addEventListener('click', runPlanner);
 }
@@ -689,6 +808,7 @@ async function ratifyCurrent() {
 async function runOne(key) {
   STATE[key]._runStartMs = Date.now();
   const path = key === 'framing' ? '/framing:run' : key === 'quality' ? '/quality:run'
+             : key === 'structure' ? '/structure:run'
              : key === 'classify' ? '/classify:run' : '/coverage:run';
   const res = await fetch('/analyst/projects/' + encodeURIComponent(pid) + path, { method: 'POST' }).then(r => r.json());
   if (!res.job_id) throw new Error('could not start ' + key);
@@ -760,6 +880,12 @@ async function runAll() {
     if (r && r.cancelled) { log('Pipeline aborted during Quality.'); return; }
     STATE.quality.done = true;
 
+    STATE.structure._running = true; render(); log('Building vocabulary + requirement tree…');
+    r = await runOne('structure');
+    STATE.structure._running = false;
+    if (r && r.cancelled) { log('Pipeline aborted during Structure.'); return; }
+    STATE.structure.done = true;
+
     STATE.classify._running = true; render(); log('Classifying requirements…');
     r = await runOne('classify');
     STATE.classify._running = false;
@@ -771,13 +897,13 @@ async function runAll() {
     STATE.coverage._running = false;
     log(r && r.cancelled ? 'Pipeline aborted during Coverage.' : 'Pipeline complete.');
   } catch (e) { log('✗ Run All stopped: ' + e.message); alert('Run All stopped:\n' + e.message); }
-  finally { busy = false; stopTicker(); ['framing', 'quality', 'classify', 'coverage'].forEach(k => STATE[k] && (STATE[k]._running = false)); await loadState(); }
+  finally { busy = false; stopTicker(); ['framing', 'quality', 'structure', 'classify', 'coverage'].forEach(k => STATE[k] && (STATE[k]._running = false)); await loadState(); }
 }
 
 // Reattach to a job already running server-side (page reloaded mid-run).
 function reattach(aj) {
   const key = aj.kind === 'coverage' ? 'coverage' : aj.kind === 'framing' ? 'framing'
-            : aj.kind === 'classify' ? 'classify' : 'quality';
+            : aj.kind === 'classify' ? 'classify' : aj.kind === 'structure' ? 'structure' : 'quality';
   busy = true; STATE[key]._running = true; STATE[key]._jobId = aj.job_id; startTicker(); render();
   log('Reattached to a running ' + STAGES.find(s => s.key === key).name + ' job…');
   const finish = async () => { busy = false; stopTicker(); if (STATE[key]) STATE[key]._running = false; await loadState(); };

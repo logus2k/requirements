@@ -252,6 +252,16 @@
           `<div class="rs-row"><div class="rs-l"><div class="rs-t">Apply resolutions automatically</div>` +
             `<div class="rs-d">Apply the resolver’s refinements and re-plan only the affected requirements. Manual keeps them for review.</div></div>` +
             seg("rs-apply", gl.apply) + `</div>` +
+          `<p class="rs-sub" style="margin-top:15px">Release gates — hand one agent’s output to the next.</p>` +
+          `<div class="rs-row"><div class="rs-l"><div class="rs-t">Analyst release gate</div>` +
+            `<div class="rs-d">Auto approves the requirement set for the Architect on completion. Manual requires your sign-off (the Release panel) before design.</div></div>` +
+            seg("rs-gate-analyst", (GATES.analyst || {}).mode || "auto") + `</div>` +
+          `<div class="rs-row"><div class="rs-l"><div class="rs-t">Architect release gate</div>` +
+            `<div class="rs-d">Auto approves the design for the Planner on completion. Manual requires your sign-off before planning starts.</div></div>` +
+            seg("rs-gate-architect", (GATES.architect || {}).mode || "auto") + `</div>` +
+          `<div class="rs-row"><div class="rs-l"><div class="rs-t">Planner release gate</div>` +
+            `<div class="rs-d">Auto approves the plan for Development on completion. Manual requires your sign-off before building.</div></div>` +
+            seg("rs-gate-planner", (GATES.planner || {}).mode || "auto") + `</div>` +
           `<div class="rs-foot"><span class="rs-msg" id="rs-msg"></span>` +
             `<button type="button" class="rs-done" id="rs-close">Done</button></div>` +
         `</div>`;
@@ -259,6 +269,21 @@
     };
     const setMsg = (t, cls) => { const m = ov.querySelector("#rs-msg"); if (m) { m.textContent = t || ""; m.className = "rs-msg" + (cls ? " " + cls : ""); } };
     let CUR = { trigger: "auto", apply: "auto" };
+    let GATES = { analyst: { mode: "auto" }, architect: { mode: "auto" }, planner: { mode: "auto" } };
+    async function saveGate(gate, mode) {
+      setMsg("Saving…");
+      try {
+        const r = await fetch("/analyst/projects/" + encodeURIComponent(pid) + "/settings", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ gates: { [gate]: { mode } } }) });
+        if (window.ReqoachAuth && window.ReqoachAuth.needAuth(r)) { setMsg("Sign-in required.", "err"); draw(CUR); return; }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const back = await r.json();
+        GATES = (back && back.gates) || GATES;
+        draw(CUR);
+        setMsg("Saved ✓", "ok"); setTimeout(() => setMsg(""), 1600);
+      } catch (e) { setMsg("Save failed.", "err"); draw(CUR); }
+    }
     async function save(next) {
       setMsg("Saving…");
       try {
@@ -276,8 +301,14 @@
     }
     function wire(gl) {
       ov.querySelectorAll(".rs-seg button").forEach(b => b.addEventListener("click", () => {
-        const which = b.parentElement.id === "rs-trigger" ? "trigger" : "apply";
-        const v = b.dataset.v;
+        const id = b.parentElement.id, v = b.dataset.v;
+        if (id.startsWith("rs-gate-")) {
+          const gate = id.slice(8);
+          if (((GATES[gate] || {}).mode || "auto") === v) return;
+          saveGate(gate, v);
+          return;
+        }
+        const which = id === "rs-trigger" ? "trigger" : "apply";
         if (gl[which] === v) return;
         save({ ...gl, [which]: v });
       }));
@@ -294,6 +325,7 @@
       const g = await fetch("/analyst/projects/" + encodeURIComponent(pid) + "/settings")
         .then(r => r.ok ? r.json() : null);
       CUR = (g && g.gap_loop) || CUR;
+      GATES = (g && g.gates) || GATES;
     } catch (e) { /* fall through with defaults */ }
     draw(CUR);
   }
