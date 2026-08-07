@@ -311,11 +311,18 @@ async function loadState() {
   const arch = await fetch('repos/' + encodeURIComponent(pid) + '/architecture').then(r => r.ok ? r.json() : {}).catch(() => ({}));
   // Release-gate state (Architect→Planner, Planner→Development): mode auto/manual + approval.
   const gsettings = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/settings').then(r => r.ok ? r.json() : {}).catch(() => ({}));
-  STATE.gates = (gsettings && gsettings.gates) || { architect: { mode: 'auto', effective: true }, planner: { mode: 'auto', effective: true } };
+  STATE.gates = (gsettings && gsettings.gates) || { analyst: { mode: 'auto', effective: true }, architect: { mode: 'auto', effective: true }, planner: { mode: 'auto', effective: true } };
+  // Analyst release gate: auto → the Architect proceeds once the analyst pipeline is complete;
+  // manual → it defers to the requirements-release sign-off (release_status validated).
+  const analystPipelineDone = STAGES.filter(s => s.key !== 'release').every(s => (STATE[s.key] || {}).done);
+  const analystGate = (STATE.gates.analyst || { mode: 'auto' });
+  const architectGateReady = analystGate.mode === 'auto'
+    ? analystPipelineDone
+    : !!(STATE.release && STATE.release.done);
   const dr = (arch && arch.design_review) || {};
   STATE.architect = {
     done: !!(arch && arch.exists),
-    ready: !!(STATE.release && (STATE.release.architectReady || STATE.release.done)),
+    ready: architectGateReady,
     aspects: (arch && arch.aspects) ? arch.aspects.length : 0,
     components: (arch && arch.aspects) ? arch.aspects.reduce((n, a) => n + ((a.components || []).length), 0) : 0,
     openIssues: (arch && arch.open_issues) ? arch.open_issues.length : 0,
@@ -664,11 +671,20 @@ function nodeHTML(s, i) {
 function releaseNodeHTML(s, i, st, enabled) {
   const pkg = 'projects/' + encodeURIComponent(pid) + '/package';
   const reissue = 'projects/' + encodeURIComponent(pid) + '/reissue';
+  const ag = (STATE.gates && STATE.gates.analyst) || { mode: 'auto' };
   let cls, stateLine, action = '';
   if (!enabled) {
     cls = 'locked';
     const need = STAGES[[...Array(i).keys()].reverse().find(k => !STATE[STAGES[k].key].done)].name;
     stateLine = `<span class="dot"></span><span class="when">Locked · run ${esc(need)} first</span>`;
+  } else if (ag.mode === 'auto' && st.status !== 'validated') {
+    // Auto gate: the Architect proceeds without a manual sign-off. Hard blockers become
+    // advisories (Manual mode is the way to enforce them). Downloads stay available.
+    cls = 'done';
+    const nb = (st.hardBlockers || []).length;
+    stateLine = `<span class="dot"></span>Auto-approved <span class="when">· Architect may proceed${nb ? ` · ${nb} advisor${nb === 1 ? 'y' : 'ies'}` : ''}</span>`;
+    action = `<a class="link" href="${pkg}" download="requirements_package.json">Download package (JSON)</a>`
+           + `<a class="link" href="${reissue}?format=pdf" target="_blank">Corrected spec (PDF)</a>`;
   } else if (st.status === 'validated') {
     cls = 'done';
     stateLine = `<span class="dot"></span>Validated${st.releasedBy ? ` <span class="when">· by ${esc(st.releasedBy)}</span>` : ''}`;

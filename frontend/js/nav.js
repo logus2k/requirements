@@ -22,7 +22,7 @@
   // section holding several pages; the future SDLC phases are shown but not yet linkable.
   const PHASES = [
     { label: "Overview",     href: "overview.html",     match: ["overview.html"] },
-    { label: "Requirements", href: "index.html",        match: ["index.html", "review.html", "coverage.html", "editor.html"] },
+    { label: "Requirements", href: "index.html",        match: ["index.html", "review.html", "coverage.html", "glossary.html", "editor.html"] },
     { label: "Architecture", href: "architecture.html", match: ["architecture.html"] },
     { label: "Planning",     href: "planning.html",     match: ["planning.html"] },
     { label: "Development",  href: "development.html",   match: ["development.html"],  soon: true },
@@ -37,6 +37,7 @@
     { label: "Review",   file: "review.html",   view: "" },
     { label: "Overlaps", file: "index.html",    view: "overlaps" },
     { label: "Coverage", file: "coverage.html", view: "" },
+    { label: "Glossary", file: "glossary.html", view: "" },
     { label: "Editor",   file: "editor.html",   view: "" },
   ];
   const reqHref = t => t.file + (pid ? "?project=" + encodeURIComponent(pid) : "")
