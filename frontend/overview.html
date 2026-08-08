@@ -223,6 +223,7 @@ const when = iso => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: '
 const STAGES = [
   { key: 'framing',   name: 'Problem Framing',  desc: 'Distil a structured problem statement from the documents.' },
   { key: 'quality',   name: 'Quality',          desc: 'INCOSE per-requirement scoring (C1–C9) + set-level checks.' },
+  { key: 'overlaps',  name: 'Deduplicate',      desc: 'Merge duplicate / substantially-overlapping requirements (set-level, reranker-confirmed) into one — a clean set before refinement.' },
   { key: 'refine',    name: 'Refinement',       desc: 'The defining capability — rewrite every below-threshold requirement toward INCOSE compliance (bounded 3 attempts), composing the obvious action for terse bullets.' },
   { key: 'structure', name: 'Structure',        desc: 'Vocabulary (glossary + tags) + requirement tree (feature branches) — the Architect designs one aspect per branch.' },
   { key: 'classify',  name: 'Classification',   desc: 'Label each requirement — routing classes, type, constraints (the Architect contract).' },
@@ -280,16 +281,19 @@ async function loadState() {
   const sortByFinished = arr => arr.slice().sort((a, b) => (a.finished_at || '').localeCompare(b.finished_at || ''));
   const qLatest = qr.length ? sortByFinished(qr).slice(-1)[0] : null;
   const cLatest = cr.length ? sortByFinished(cr).slice(-1)[0] : null;
-  const [cls, structure, refine] = qr.length ? await Promise.all([
+  const [cls, structure, refine, overlaps] = qr.length ? await Promise.all([
     fetch('/analyst/projects/' + encodeURIComponent(pid) + '/classification').then(r => r.ok ? r.json() : {}).catch(() => ({})),
     fetch('/analyst/projects/' + encodeURIComponent(pid) + '/structure').then(r => r.ok ? r.json() : {}).catch(() => ({})),
     fetch('/analyst/projects/' + encodeURIComponent(pid) + '/refine').then(r => r.ok ? r.json() : {}).catch(() => ({})),
-  ]) : [{}, {}, {}];
+    fetch('/analyst/projects/' + encodeURIComponent(pid) + '/overlaps').then(r => r.ok ? r.json() : {}).catch(() => ({})),
+  ]) : [{}, {}, {}, {}];
   STATE = {
     framing:   { done: !!(ps && ps.version >= 1 && ps.statement), ratified: !!(ps && ps.ratified), when: ps && ps.updated_at },
     quality:   { done: qr.length > 0, when: lastWhen(qr), count: qr.length,
                  info: qLatest && qLatest.total ? qLatest.total + ' requirements' : '',
                  runId: qLatest ? qLatest.run_id : null },
+    overlaps:  { done: !!overlaps.done,
+                 info: overlaps.done ? (overlaps.merged + ' merged, ' + overlaps.absorbed + ' removed') : (overlaps.detected ? overlaps.detected + ' detected' : '') },
     refine:    { done: !!refine.done,
                  info: refine.done ? (refine.refined + ' refined' + (refine.rejected ? ', ' + refine.rejected + ' rejected' : '') + (refine.needs_human ? ', ' + refine.needs_human + ' need human' : '') + (refine.mean_after != null ? ' · mean ' + refine.mean_after : '')) : '' },
     structure: { done: !!structure.done,
@@ -828,6 +832,13 @@ async function ratifyCurrent() {
 // Run one stage as a streamed job; returns the final snapshot ({cancelled:true} if aborted).
 async function runOne(key) {
   STATE[key]._runStartMs = Date.now();
+  // Deduplicate is a SYNCHRONOUS endpoint (no job to poll) — merge and return.
+  if (key === 'overlaps') {
+    const res = await fetch('/analyst/projects/' + encodeURIComponent(pid) + '/overlaps:merge?apply=true',
+      { method: 'POST' });
+    if (res.status === 401 || res.status === 403) { if (window.ReqoachAuth) window.ReqoachAuth.needAuth(res); return {}; }
+    return await res.json().catch(() => ({}));
+  }
   const path = key === 'framing' ? '/framing:run' : key === 'quality' ? '/quality:run'
              : key === 'refine' ? '/refine:run'
              : key === 'structure' ? '/structure:run'
@@ -902,6 +913,11 @@ async function runAll() {
     if (r && r.cancelled) { log('Pipeline aborted during Quality.'); return; }
     STATE.quality.done = true;
 
+    STATE.overlaps._running = true; render(); log('Merging duplicate / overlapping requirements…');
+    await runOne('overlaps');
+    STATE.overlaps._running = false;
+    STATE.overlaps.done = true;
+
     STATE.refine._running = true; render(); log('Refining requirements toward INCOSE compliance…');
     r = await runOne('refine');
     STATE.refine._running = false;
@@ -925,7 +941,7 @@ async function runAll() {
     STATE.coverage._running = false;
     log(r && r.cancelled ? 'Pipeline aborted during Coverage.' : 'Pipeline complete.');
   } catch (e) { log('✗ Run All stopped: ' + e.message); alert('Run All stopped:\n' + e.message); }
-  finally { busy = false; stopTicker(); ['framing', 'quality', 'refine', 'structure', 'classify', 'coverage'].forEach(k => STATE[k] && (STATE[k]._running = false)); await loadState(); }
+  finally { busy = false; stopTicker(); ['framing', 'quality', 'overlaps', 'refine', 'structure', 'classify', 'coverage'].forEach(k => STATE[k] && (STATE[k]._running = false)); await loadState(); }
 }
 
 // Reattach to a job already running server-side (page reloaded mid-run).
